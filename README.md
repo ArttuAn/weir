@@ -1,6 +1,11 @@
-# weir
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
+  <img alt="weir — a router for an internet whose traffic is agents" src="docs/assets/banner-light.svg" width="720">
+</picture>
 
-**A router for an internet whose traffic is agents.**
+<a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square" height="20"></a>
+<a href="#run-it"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square" height="20"></a>
+<img alt="No runtime dependencies" src="https://img.shields.io/badge/dependencies-none-0F766E?style=flat-square" height="20">
 
 A weir is the thing in a river that does not dam it. It shapes the flow, meters
 the discharge, and makes an otherwise unmeasurable river accountable. That is
@@ -29,19 +34,26 @@ instead of one — *who authorised this, what is it trying to do, what may it
 spend, when does the answer expire* — and every mechanism below falls out of
 having those four answers at the hop.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/header-dark.svg">
+  <img alt="An IPv4 header, which can answer where a packet is going, beside a WIH-0 header, which answers who authorised it, what it is trying to do, what it may spend and when the answer expires." src="docs/assets/header-light.svg" width="980">
+</picture>
+
 ---
 
 ## The five mechanisms
 
-**1. Delegation path vector.** BGP solved "carry where you have been, refuse
-anything that has been through you" in 1994. Weir applies AS_PATH semantics to
-delegation instead of topology, so a 3-cycle dies on its first repetition while
-a legitimate 12-stage pipeline is untouched. A hop limit can do neither.
+![](docs/assets/icon-delegation.svg) **1. Delegation path vector.** BGP solved
+"carry where you have been, refuse anything that has been through you" in 1994.
+Weir applies AS_PATH semantics to delegation instead of topology, so a 3-cycle
+dies on its first repetition while a legitimate 12-stage pipeline is untouched. A
+hop limit can do neither.
 
-**2. Budget conserved across fan-out.** Budget belongs to the *root* request —
-every descendant of one human action shares a root, and the router's ledger is
-authoritative while the header's number is advisory, exactly as TTL is
-authoritative in the network rather than at the sender. The consequence:
+![](docs/assets/icon-budget.svg) **2. Budget conserved across fan-out.** Budget
+belongs to the *root* request — every descendant of one human action shares a
+root, and the router's ledger is authoritative while the header's number is
+advisory, exactly as TTL is authoritative in the network rather than at the
+sender. The consequence:
 
 > An agent swarm cannot spend more than its root was granted, no matter how it
 > fans out, how deep it recurses, or how badly its authors got the termination
@@ -51,36 +63,50 @@ Fan-out *divides* a budget rather than multiplying one, so exponential swarms
 terminate as an arithmetic property instead of as a thing every agent author has
 to remember.
 
-**3. Metered refusal, and appointments instead of apologies.** Retry storms
-exist because a rejection carries no scheduling information, so every caller has
-to guess when to come back — and jitter is just a way of making everyone guess
-differently. A weir refusal names the time: a signed bearer ticket for a slot the
-router has actually set aside. Presenting it punctually admits you ahead of
-unticketed traffic; retrying early costs escalating credits and *cannot* move
-your slot earlier. Waiting becomes both cheaper and faster than racing, so the
-storm stops being the rational strategy — and no agent had to be well-behaved
-for that to happen. That is the difference between a convention and a mechanism.
+![](docs/assets/icon-appointment.svg) **3. Metered refusal, and appointments
+instead of apologies.** Retry storms exist because a rejection carries no
+scheduling information, so every caller has to guess when to come back — and
+jitter is just a way of making everyone guess differently. A weir refusal names
+the time: a signed bearer ticket for a slot the router has actually set aside.
+Presenting it punctually admits you ahead of unticketed traffic; retrying early
+costs escalating credits and *cannot* move your slot earlier. Waiting becomes
+both cheaper and faster than racing, so the storm stops being the rational
+strategy — and no agent had to be well-behaved for that to happen. That is the
+difference between a convention and a mechanism.
 
-**4. Deadlines, and expiry before execution.** Every request carries when its
-answer stops being worth having, and whether a human is blocked on it. The
-router schedules earliest-deadline-first with a reserved share of capacity for
-human-coupled work, and — the part with the largest practical payoff — it
-*drops work that is already worthless*. Today an enormous share of in-flight
-agent work is for callers that timed out, took a fallback and moved on, while
-the tokens are still being generated for an answer nobody will read. Nothing in
-HTTP carries "the caller gave up". A router holding a deadline can see it.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/appointments-dark.svg">
+  <img alt="Two lanes of arrivals per interval against a capacity line. Above, a bursty lane against a classic gateway: bars overshoot the capacity line and collisions follow. Below, a flat lane against weir: every bar sits at or under the line, because each caller holds a signed slot." src="docs/assets/appointments-light.svg" width="980">
+</picture>
 
-**5. Receipts.** Counters answer "how much". They cannot answer "on whose
-authority", which is the only question that matters when the thing crossing your
-network was autonomous and spending someone's money. Every decision is
-hash-chained and tamper-evident. Payloads are deliberately not recorded: a
-receipt log full of prompts is a breach waiting for an occasion.
+![](docs/assets/icon-deadline.svg) **4. Deadlines, and expiry before
+execution.** Every request carries when its answer stops being worth having, and
+whether a human is blocked on it. The router schedules earliest-deadline-first
+with a reserved share of capacity for human-coupled work, and — the part with
+the largest practical payoff — it *drops work that is already worthless*. Today
+an enormous share of in-flight agent work is for callers that timed out, took a
+fallback and moved on, while the tokens are still being generated for an answer
+nobody will read. Nothing in HTTP carries "the caller gave up". A router holding
+a deadline can see it.
 
-Plus **intent-digest coalescing** (a hundred agents asking one question in a
-hundred phrasings is one upstream call, not a hundred cache misses — scoped by
-principal, because otherwise the cache is an exfiltration primitive) and
-**terms enforced at the hop** (robots.txt that is a mechanism rather than a
-request, and that gives compliant crawlers a credential they can *show*).
+![](docs/assets/icon-receipts.svg) **5. Receipts.** Counters answer "how much".
+They cannot answer "on whose authority", which is the only question that matters
+when the thing crossing your network was autonomous and spending someone's
+money. Every decision is hash-chained and tamper-evident. Payloads are
+deliberately not recorded: a receipt log full of prompts is a breach waiting for
+an occasion.
+
+Plus ![](docs/assets/icon-coalesce.svg) **intent-digest coalescing** (a hundred
+agents asking one question in a hundred phrasings is one upstream call, not a
+hundred cache misses — scoped by principal, because otherwise the cache is an
+exfiltration primitive) and ![](docs/assets/icon-terms.svg) **terms enforced at
+the hop** (robots.txt that is a mechanism rather than a request, and that gives
+compliant crawlers a credential they can *show*).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
+  <img alt="The twelve forwarding stages in order, with cost bars. Stages one to nine are header arithmetic and admission control, all sub-millisecond and all before any network call. Stage ten, forward, is the only expensive step, and stage eleven settles and stage twelve writes the receipt." src="docs/assets/pipeline-light.svg" width="980">
+</picture>
 
 ---
 
@@ -177,3 +203,12 @@ worth reading before you believe anything above.
 ## License
 
 MIT
+
+---
+
+The artwork is generated, not drawn by hand. Edit
+[`scripts/make_assets.py`](scripts/make_assets.py) and re-run it; every diagram
+ships in a light and a dark variant, and the icons are theme-free so they can sit
+inline in a sentence. `.github/avatar.png` is the same mark rasterised by
+[`scripts/make_avatar.py`](scripts/make_avatar.py), since GitHub will not take an
+SVG for a repository avatar.
