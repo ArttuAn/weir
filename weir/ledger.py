@@ -58,6 +58,9 @@ class RootAccount:
     hops: int = 0
     overruns: int = 0
     opened_at: float = 0.0
+    #: Last time this root was touched. Collection is driven by this, not
+    #: by ``opened_at`` - see :meth:`Ledger.expire`.
+    last_seen: float = 0.0
 
     @property
     def committed(self) -> int:
@@ -89,7 +92,9 @@ class Ledger:
         self._accounts: dict[str, RootAccount] = {}
         self._lock = threading.Lock()
         self.default_grant = default_grant
+        #: Seconds of *inactivity* after which a root's accounting is dropped.
         self.ttl = ttl
+        self.expired = 0
         self.grants: dict[str, int] = {}   # principal -> per-root grant
 
     # -- accounts ------------------------------------------------------
@@ -99,12 +104,15 @@ class Ledger:
 
     def open(self, root: str, principal: str, *, grant: int | None = None) -> RootAccount:
         with self._lock:
+            now = self._clock.now()
             acct = self._accounts.get(root)
             if acct is None:
                 acct = RootAccount(root=root,
                                    granted=grant if grant is not None else self.grant_for(principal),
-                                   opened_at=self._clock.now())
+                                   opened_at=now, last_seen=now)
                 self._accounts[root] = acct
+            else:
+                acct.last_seen = now
             return acct
 
     def get(self, root: str) -> RootAccount | None:
@@ -128,6 +136,7 @@ class Ledger:
         if acct is None:
             return 0
         with self._lock:
+            acct.last_seen = self._clock.now()
             acct.reserved = max(0, acct.reserved - reserved)
             acct.settled += observed
             if observed > reserved:
@@ -163,11 +172,34 @@ class Ledger:
     # -- housekeeping --------------------------------------------------
 
     def expire(self) -> int:
+        """Collect roots that have gone quiet. Returns how many were dropped.
+
+        Collection is keyed on **idleness, not age**, and the difference is a
+        correctness property rather than a tuning preference.
+
+        Dropping an account by age deletes the ledger entry of a task that is
+        still running, and the next hop under that root re-opens it with a
+        *full grant*. Budget conservation - the one invariant this whole design
+        rests on - would then silently fail for precisely the long-running
+        swarms it exists to contain, and fail in the quietest possible way: no
+        error, no refusal, just an agent that gets a fresh wallet every hour.
+
+        Keyed on idleness, a root that is still doing work is never collected,
+        and a root that has finished is collected promptly. Memory is still
+        bounded, by ``rate x ttl`` live roots rather than by ``rate x
+        task-duration``.
+
+        ``ttl`` therefore means "how long after a task goes quiet do we keep
+        its accounting", and it no longer has to be guessed against the
+        duration of the longest task anyone might run.
+        """
         now = self._clock.now()
         with self._lock:
-            dead = [r for r, a in self._accounts.items() if now - a.opened_at > self.ttl]
+            dead = [r for r, a in self._accounts.items()
+                    if now - a.last_seen > self.ttl and a.reserved == 0]
             for r in dead:
                 del self._accounts[r]
+            self.expired += len(dead)
             return len(dead)
 
     def stats(self) -> dict[str, int]:
@@ -179,4 +211,5 @@ class Ledger:
                 "refused": sum(a.refused for a in self._accounts.values()),
                 "hops": sum(a.hops for a in self._accounts.values()),
                 "overruns": sum(a.overruns for a in self._accounts.values()),
+                "expired": self.expired,
             }

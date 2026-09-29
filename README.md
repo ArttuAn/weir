@@ -188,6 +188,77 @@ with.
 
 ---
 
+## How it works in real life
+
+A design that has only ever run in a simulator is a hypothesis.
+[`docs/PHYSICAL.md`](docs/PHYSICAL.md) is the part that asks what the thing
+actually is when you rack it, power it and get paged about it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/topology-dark.svg">
+  <img alt="An agent fleet behind a weir router at its egress, across the public internet to a second weir router at a model provider's ingress, then the model servers." src="docs/assets/topology-light.svg" width="980">
+</picture>
+
+**It is not a switch ASIC and cannot become one.** Agent traffic is HTTPS, so
+the intent header lives inside the TLS session and the box must terminate TLS
+before it can decide anything. Weir is a server-class L7 element — capacity in
+decisions per second, concurrent connections and retained state, never in
+packets per second. A 100 GbE port would be decoration.
+
+But the pipeline ordering turns out to have a consequence nobody designed in:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/internals-dark.svg">
+  <img alt="Stages one to five form a stateless prefix that a DPU can offload; stages six to twelve touch mutable money-bearing state and must run on the host. Appointments survive node loss, the ledger must be checkpointed." src="docs/assets/internals-light.svg" width="980">
+</picture>
+
+The offloadable set is exactly the **stateless prefix**. The checks were put
+first for latency; it happens that this is also the line silicon can be trusted
+across, because everything after it mutates money.
+
+`python3 scripts/bench.py` measures what the box must be sized against. State
+sizes transfer to any implementation; the CPU figures are CPython and are a
+floor, not a target:
+
+```
+ledger        288 bytes per live root account
+receipt       428 bytes per decision
+appointment    56 bytes — held by the CALLER, not the router
+
+at 10,000 decisions/second:
+  receipts            0.37 TB/day raw  (~0.05 TB/day compressed)
+  ledger, 1h idle TTL 10.4 GB resident
+```
+
+**Storage and memory are the binding constraints — not CPU, not bandwidth.**
+
+Two findings worth the trip, both present in code that passed 49 tests and four
+simulated scenarios:
+
+- **Nothing ever swept.** `expire()` and `sweep()` existed and were never
+  called — roughly 250 GB/day of accumulation at 10k decisions/second. The
+  router does not misbehave as it fills. It dies, of memory, having passed every
+  functional test on the way.
+- **Expiry silently reset budgets.** Collection was keyed on *age*, so a task
+  outliving the TTL had its ledger entry deleted mid-flight and its next hop
+  re-opened the account with a full grant. Budget conservation would have failed
+  precisely for the long-running swarms it exists to contain — and failed
+  silently. Now collected on **idleness**, so `ttl` means "how long after a task
+  goes quiet do we keep its accounting" and never has to be guessed against the
+  longest task anyone might run.
+
+Clocks are load-bearing and are handled in two different ways, because they are
+two different problems. Appointments need **no** synchronisation — a refusal
+carries `weir-now`, so the caller computes its wait as a difference between two
+readings of the router's clock and its own skew cancels exactly. Otherwise a
+caller 200 ms fast would arrive early and be charged a penalty for an NTP fault,
+by a mechanism whose whole purpose is to make incentives honest.
+`tests/test_clock_skew.py` runs callers ±45 s out, over real sockets, and
+asserts zero penalties. Deadlines are absolute and genuinely do require NTP
+within ~100 ms; §5 says so rather than pretending otherwise.
+
+---
+
 ## Status
 
 A working reference implementation of the forwarding plane, and a specification
@@ -198,6 +269,7 @@ worth reading before you believe anything above.
 - [`docs/DESIGN.md`](docs/DESIGN.md) — the architecture and why each classical mechanism fails
 - [`docs/SPEC-WIH-0.md`](docs/SPEC-WIH-0.md) — the wire format
 - [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) — what a hostile agent can still do
+- [`docs/PHYSICAL.md`](docs/PHYSICAL.md) — the physical system: placement, dimensioning, clustering, failure modes
 - [`docs/STATUS.md`](docs/STATUS.md) — implemented vs. designed vs. unsolved
 
 ## License

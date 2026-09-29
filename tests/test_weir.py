@@ -507,3 +507,50 @@ class TestConcurrency(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestHousekeeping(unittest.TestCase):
+    """An unattended router dies of memory. These pin the sweep."""
+
+    def setUp(self):
+        self.clock = VirtualClock()
+        self.router = Router(RouterConfig(default_grant=100 * CREDIT), clock=self.clock)
+        self.router.route(Route("agent", "upstream", price=100, latency=0.1))
+        self.router.ledger.ttl = 60.0
+
+    def up(self, fwd, route):
+        return {"ok": True}
+
+    def test_finished_roots_are_collected(self):
+        for n in range(200):
+            self.router.forward(mk(root=f"r{n}", intent_digest=f"b2:{n}"),
+                                upstream=self.up)
+        self.assertEqual(self.router.ledger.stats()["roots"], 200)
+        self.clock._now += 61
+        self.router.housekeep()
+        self.assertEqual(self.router.ledger.stats()["roots"], 0)
+
+    def test_a_running_task_is_never_collected(self):
+        """Budget conservation must not lapse because a task took a long time."""
+        root = new_root()
+        for lap in range(10):
+            # A live deadline each lap: this task really is still working, as
+            # opposed to one whose requests are all being refused as expired.
+            d = self.router.forward(
+                mk(root=root, deadline=self.clock.now() + 300,
+                   intent_digest=f"b2:lap{lap}"), upstream=self.up)
+            self.assertTrue(d.ok, f"lap {lap} refused: {d.reason}")
+            self.clock._now += 30          # half a TTL between hops
+            self.router.housekeep()
+        acct = self.router.ledger.get(root)
+        self.assertIsNotNone(acct, "a root doing work was collected mid-task")
+        self.assertEqual(acct.settled, 1000,
+                         "spend must survive; a reset grant is a silent budget leak")
+
+    def test_sweep_does_not_drop_reserved_state(self):
+        adm = self.router.begin(mk(root="held", coupling="human"))
+        self.clock._now += 10_000
+        self.router.housekeep()
+        self.assertIsNotNone(self.router.ledger.get("held"),
+                             "an in-flight reservation was swept")
+        adm.settle(observed=100)

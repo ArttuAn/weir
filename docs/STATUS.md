@@ -20,6 +20,8 @@ Everything here is exercised by `tests/` (46 tests, stdlib `unittest`) and by
 | Hash-chained receipts | `receipts.py` | Tamper and deletion detection tested |
 | Capability FIB, longest-match, deadline-aware selection | `fib.py` | |
 | Forwarding pipeline, sync + async admission | `router.py` | |
+| Idle-based state collection (housekeeping) | `router.py`, `ledger.py` | Age-based expiry silently reset budgets; see PHYSICAL.md §11 |
+| Clock-skew-immune appointments | `server.py`, `client.py` | Tested at ±45s over real sockets |
 | HTTP/1.1 data plane, agent SDK, CLI | `server.py`, `client.py`, `cli.py` | |
 
 ## Specified, not implemented
@@ -34,7 +36,10 @@ Everything here is exercised by `tests/` (46 tests, stdlib `unittest`) and by
 ## Known-unsolved
 
 - **Cross-router budget conservation.** One root can spend its grant once per
-  independent router. Needs CAP.
+  independent router. Needs CAP. Solved *within* a cluster by sharding roots
+  (PHYSICAL.md §6), not across administrative domains.
+- **No hardware has been tested.** The offload analysis and hardware profiles
+  in PHYSICAL.md are reasoning, not measurement; §12 lists what that leaves open.
 - **Self-declared urgency.** Attestation makes a `human` coupling claim
   attributable, not true. The defence is economic and reputational.
 - **Semantic coalescing.** Exact canonical digests only. Real equivalence needs

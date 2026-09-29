@@ -52,6 +52,8 @@ def make_handler(router: Router):
                 ok, msg = router.receipts.verify()
                 return self._send(200, {"verified": ok, "detail": msg,
                                         "tip": router.receipts.tip})
+            if self.path == "/_weir/housekeep":
+                return self._send(200, router.housekeep())
             if self.path == "/_weir/routes":
                 return self._send(200, {"routes": [r.__dict__ for r in router.fib.routes()]})
             return self._send(404, {"error": "not found"})
@@ -79,17 +81,26 @@ def make_handler(router: Router):
 
             decision = router.forward(intent, ticket, upstream=upstream)
 
+            # The router's own clock, on every response. A caller that subtracts
+            # its own wall clock from a router timestamp folds clock skew
+            # straight into the wait - and then gets charged a penalty for
+            # being early when the only thing wrong was NTP. Echoing `now`
+            # lets the caller work in deltas, where the skew cancels.
+            now_hdr = {"weir-now": f"{router.clock.now():.3f}"}
+
             if decision.ok:
                 return self._send(200, {
                     "disposition": decision.disposition,
                     "credits": decision.credits,
                     "upstream": decision.route.upstream if decision.route else None,
                     "result": decision.result,
-                }, {"weir-disposition": decision.disposition,
+                }, {**now_hdr,
+                    "weir-disposition": decision.disposition,
                     "weir-credits": str(decision.credits),
                     "weir-receipt": router.receipts.tip})
 
-            extra = {"weir-reason": decision.reason, "weir-credits": str(decision.credits)}
+            extra = {**now_hdr, "weir-reason": decision.reason,
+                     "weir-credits": str(decision.credits)}
             if decision.retry_not_before is not None:
                 wait = max(0.0, decision.retry_not_before - router.clock.now())
                 # Retry-After for clients that have never heard of weir; the
@@ -108,9 +119,29 @@ def make_handler(router: Router):
     return Handler
 
 
-def serve(router: Router, host: str = "127.0.0.1", port: int = 8710) -> ThreadingHTTPServer:
+def _housekeeper(router: Router, every: float) -> threading.Thread:
+    """Sweep finished state on a timer, off the request path."""
+    stop = threading.Event()
+
+    def loop() -> None:
+        while not stop.wait(every):
+            try:
+                router.housekeep()
+            except Exception:  # never let maintenance kill the data plane
+                pass
+
+    t = threading.Thread(target=loop, daemon=True, name="weir-housekeeper")
+    t.stop = stop  # type: ignore[attr-defined]
+    t.start()
+    return t
+
+
+def serve(router: Router, host: str = "127.0.0.1", port: int = 8710,
+          *, housekeep_every: float = 30.0) -> ThreadingHTTPServer:
     httpd = ThreadingHTTPServer((host, port), make_handler(router))
     httpd.daemon_threads = True
+    # Without this the router leaks root accounts until it is killed.
+    httpd.housekeeper = _housekeeper(router, housekeep_every)  # type: ignore[attr-defined]
     return httpd
 
 

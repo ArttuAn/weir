@@ -276,6 +276,34 @@ class Router:
         over = max(0, d.inflight - int(d.limit))
         return over * (d._service_estimate / max(d.limit, 1.0))
 
+    def housekeep(self) -> dict[str, int]:
+        """Collect finished state. Must be called periodically.
+
+        Nothing on the request path does this, deliberately - a forwarding
+        decision should not pay for someone else's garbage. But that means an
+        unattended router grows without bound: at ten thousand decisions a
+        second, root accounts alone accumulate around 250 GB a day. A weir that
+        is never swept does not misbehave, it dies, and it dies of memory
+        rather than of anything a load test would have shown.
+
+        :meth:`weir.server.serve` starts a thread for this. Any other embedding
+        has to call it too.
+        """
+        dropped = {
+            "roots_expired": self.ledger.expire(),
+            "cache_swept": self.coalescer.sweep(),
+            "fanout_keys": 0,
+        }
+        # Fan-out counters are keyed per (root, delegator) and are decremented
+        # on settle, so they self-clean - but a crashed caller that never
+        # settles leaks one. Drop keys whose root the ledger has forgotten.
+        with self._fanout_lock:
+            stale = [k for k in self._fanout if self.ledger.get(k[0]) is None]
+            for k in stale:
+                del self._fanout[k]
+            dropped["fanout_keys"] = len(stale)
+        return dropped
+
     def stats(self) -> dict[str, Any]:
         return {
             "router": {"aas": self.config.aas, "name": self.config.name, **self.counters},

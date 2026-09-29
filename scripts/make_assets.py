@@ -311,12 +311,144 @@ def build_header(t: dict) -> str:
     return svg(W, H, "".join(b), title="IPv4 header vs the Weir Intent Header")
 
 
+# ---------------------------------------------------------------------------
+# Topology: where the box sits. Same binary, two placements, different job.
+# ---------------------------------------------------------------------------
+
+def _node(t, x, y, w, h, title, sub, *, accent=False):
+    col = t["water"] if accent else t["line"]
+    out = [rect(x, y, w, h, fill=t["panel"], stroke=col, rx=10, sw=2 if accent else 1)]
+    out.append(text(x + w / 2, y + 26, title, size=15, fill=t["ink"],
+                    weight=700, anchor="middle"))
+    for i, sline in enumerate(sub):
+        out.append(text(x + w / 2, y + 48 + i * 17, sline, size=12,
+                        fill=t["muted"], anchor="middle"))
+    return out
+
+
+def _arrow(t, x1, y, x2, *, label="", colour=None):
+    c = colour or t["muted"]
+    out = [line(x1, y, x2 - 9, y, stroke=c, sw=2),
+           f'<path d="M {x2} {y} L {x2 - 10} {y - 5} L {x2 - 10} {y + 5} Z" fill="{c}"/>']
+    if label:
+        out.append(text((x1 + x2) / 2, y - 10, label, size=11.5,
+                        fill=c, anchor="middle"))
+    return out
+
+
+def build_topology(t: dict) -> str:
+    W, H = 980, 340
+    y, bh = 96, 96
+    b = [
+        text(24, 40, "Where the box sits", size=21, fill=t["ink"], weight=700),
+        text(24, 64, "Same binary in both places. Neither subsumes the other: the "
+                     "provider cannot see your fan-out, and you cannot see their capacity.",
+             size=13.5, fill=t["muted"]),
+    ]
+    b += _node(t, 24, y, 176, bh, "agent fleet",
+               ["planners, tools,", "sub-agents"])
+    b += _arrow(t, 200, y + bh / 2, 250)
+    b += _node(t, 250, y, 196, bh, "weir · egress",
+               ["budget conservation", "delegation loops", "fan-out width"], accent=True)
+    b += _arrow(t, 446, y + bh / 2, 520, label="public internet")
+    b += _node(t, 520, y, 196, bh, "weir · ingress",
+               ["terms + admission", "coalescing", "human reserve"], accent=True)
+    b += _arrow(t, 716, y + bh / 2, 780)
+    b += _node(t, 780, y, 176, bh, "model servers",
+               ["the scarce GPUs"])
+
+    b.append(text(250, y + bh + 30, "sees a whole root's tree", size=12,
+                  fill=t["water"], weight=650))
+    b.append(text(520, y + bh + 30, "owns the scarce resource", size=12,
+                  fill=t["water"], weight=650))
+    b.append(line(24, y + bh + 52, W - 24, y + bh + 52, stroke=t["line"],
+                  sw=1, dash="3 4"))
+    b.append(text(24, y + bh + 78,
+                  "A third placement, between Agent Autonomous Systems, needs the CAP "
+                  "control plane — designed in SPEC-CAP-0.md, not built.",
+                  size=12.5, fill=t["muted"]))
+    return svg(W, H, "".join(b), title="weir deployment topology")
+
+
+# ---------------------------------------------------------------------------
+# Inside the box: the offload boundary falls where the state begins.
+# ---------------------------------------------------------------------------
+
+def build_internals(t: dict) -> str:
+    W, H = 980, 396
+    b = [
+        text(24, 40, "Inside the box: the offload boundary is the state boundary",
+             size=21, fill=t["ink"], weight=700),
+        text(24, 64, "Stages were ordered cheapest-first for latency. That ordering "
+                     "turns out to decide what silicon can take.", size=13.5,
+             fill=t["muted"]),
+    ]
+
+    # offloadable prefix
+    x, y, w, h = 24, 92, 440, 150
+    b.append(rect(x, y, w, h, fill=t["panel"], stroke=t["water"], rx=12, sw=2,
+                  dash="7 5"))
+    b.append(text(x + 18, y + 28, "stages 1–5  ·  stateless prefix", size=15,
+                  fill=t["ink"], weight=700))
+    for i, sname in enumerate(["parse", "attest", "loop / depth", "deadline", "terms"]):
+        cx = x + 22 + i * 84
+        b.append(rect(cx, y + 44, 74, 30, fill=t["chip"], stroke=t["water"], rx=6))
+        b.append(text(cx + 37, y + 64, sname, size=11.5, fill=t["ink"],
+                      anchor="middle", weight=600))
+    b.append(text(x + 18, y + 100, "pure functions of the header.", size=12.5,
+                  fill=t["muted"]))
+    b.append(text(x + 18, y + 120, "OFFLOADABLE — a DPU can drop a loop or an "
+                                   "expired", size=12.5, fill=t["water"], weight=650))
+    b.append(text(x + 18, y + 136, "request without waking the host.", size=12.5,
+                  fill=t["water"], weight=650))
+
+    # host-only remainder
+    x2 = 516
+    b.append(rect(x2, y, 440, h, fill=t["panel"], stroke=t["line"], rx=12))
+    b.append(text(x2 + 18, y + 28, "stages 6–12  ·  mutable state", size=15,
+                  fill=t["ink"], weight=700))
+    for i, sname in enumerate(["route", "budget", "damper", "coalesce"]):
+        cx = x2 + 22 + i * 104
+        b.append(rect(cx, y + 44, 94, 30, fill=t["panel"], stroke=t["line"], rx=6))
+        b.append(text(cx + 47, y + 64, sname, size=11.5, fill=t["ink"],
+                      anchor="middle", weight=600))
+    b.append(text(x2 + 18, y + 100, "contended, mutable, money-bearing.", size=12.5,
+                  fill=t["muted"]))
+    b.append(text(x2 + 18, y + 120, "HOST ONLY — not a tuning decision,", size=12.5,
+                  fill=t["warn"], weight=650))
+    b.append(text(x2 + 18, y + 136, "a correctness one.", size=12.5,
+                  fill=t["warn"], weight=650))
+
+    # state durability strip
+    sy = 268
+    b.append(text(24, sy, "what survives losing the node", size=14,
+                  fill=t["ink"], weight=700))
+    items = [("appointments", "signed bearer tokens — survive", t["water"]),
+             ("slot cursor", "soft — rebuilds in one interval", t["muted"]),
+             ("ledger", "HARD — must be checkpointed", t["bad"]),
+             ("receipts", "only if shipped off-box", t["warn"])]
+    for i, (nm, note, col) in enumerate(items):
+        cx = 24 + i * 238
+        b.append(rect(cx, sy + 14, 224, 54, fill=t["panel"], stroke=col, rx=8))
+        b.append(text(cx + 14, sy + 36, nm, size=13, fill=t["ink"],
+                      weight=700, family=MONO))
+        b.append(text(cx + 14, sy + 56, note, size=11.5, fill=col))
+
+    b.append(text(24, H - 12,
+                  "Measured state sizes and the dimensioning they imply: "
+                  "docs/PHYSICAL.md §4, from scripts/bench.py.",
+                  size=12.5, fill=t["muted"]))
+    return svg(W, H, "".join(b), title="weir internals and offload boundary")
+
+
 BUILDERS = {
     "logo": build_logo,
     "banner": build_banner,
     "pipeline": build_pipeline,
     "appointments": build_appointments,
     "header": build_header,
+    "topology": build_topology,
+    "internals": build_internals,
 }
 
 
