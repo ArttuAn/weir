@@ -24,12 +24,12 @@ MONO = "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace"
 # sibling used wherever the teal carries words, because small teal text on a
 # light panel is 3.5:1 and fails WCAG AA at any size below 19px.
 LIGHT = dict(
-    name="light", ink="#0B2530", muted="#5B7180", panel="#F3F8F9",
+    name="light", bg="#FFFFFF", ink="#0B2530", muted="#5B7180", panel="#F3F8F9",
     line="#C6D5DB", water="#0D9488", water_ink="#0F766E", warn="#C2410C",
     bad="#DC2626", chip="#E6F2F1",
 )
 DARK = dict(
-    name="dark", ink="#E6EDF3", muted="#93A6B3", panel="#12181F",
+    name="dark", bg="#0D1117", ink="#E6EDF3", muted="#93A6B3", panel="#12181F",
     line="#2C3A45", water="#2DD4BF", water_ink="#2DD4BF", warn="#FB923C",
     bad="#F87171", chip="#10262A",
 )
@@ -441,6 +441,625 @@ def build_internals(t: dict) -> str:
     return svg(W, H, "".join(b), title="weir internals and offload boundary")
 
 
+
+# ===========================================================================
+# Patent-style figures.
+#
+# Drawing *convention*, not legal status: nothing here is filed, and the README
+# says so. The convention is used because it is unusually demanding - every part
+# carries a reference numeral, numerals stay consistent across sheets, and every
+# branch of the method has to terminate somewhere. Drawing it this way is a test
+# of whether the design is actually specified or merely described.
+#
+# Monochrome line art in the patent tradition, with one concession: the ink
+# colour follows the theme, so the dark-mode sheet is legible. A pure black
+# plate on a dark README is a plate nobody can read.
+# ===========================================================================
+
+PT_THIN, PT_MED, PT_THICK = 1.0, 1.5, 2.1
+
+
+def p_rect(x, y, w, h, ink, *, rx=0, sw=PT_MED, fill="none", dash=None):
+    d = f' stroke-dasharray="{dash}"' if dash else ""
+    return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fill}" '
+            f'stroke="{ink}" stroke-width="{sw}"{d}/>')
+
+
+def p_txt(x, y, sgn, ink, *, size=11, anchor="start", weight=500, family=SANS,
+          spacing=None, opacity=1.0):
+    return text(x, y, sgn, size=size, fill=ink, weight=weight, anchor=anchor,
+                family=family, spacing=spacing, opacity=opacity)
+
+
+def p_lead(pts, ink, *, sw=PT_THIN, dot=True):
+    """A lead line: numeral to part, with the small terminal dot patents use."""
+    d = " ".join(("M" if i == 0 else "L") + f" {x} {y}" for i, (x, y) in enumerate(pts))
+    out = [f'<path d="{d}" fill="none" stroke="{ink}" stroke-width="{sw}"/>']
+    if dot:
+        ex, ey = pts[-1]
+        out.append(f'<circle cx="{ex}" cy="{ey}" r="2.4" fill="{ink}"/>')
+    return "".join(out)
+
+
+def p_ref(nx, ny, target, n, ink, *, size=12, anchor="middle", via=None):
+    """Reference numeral plus its lead line.
+
+    The lead leaves the numeral from whichever side faces the part, so it never
+    strikes through its own digits. Getting this wrong is the single most
+    obvious tell that a plate was not drawn by someone who draws plates.
+    """
+    tx, ty = target
+    start = (nx, ny - 13) if ty < ny else (nx, ny + 6)
+    pts = [start] + ([via] if via else []) + [(tx, ty)]
+    return p_lead(pts, ink) + p_txt(nx, ny, str(n), ink, size=size, anchor=anchor,
+                                    weight=700, family=MONO)
+
+
+def p_arrow(x1, y1, x2, y2, ink, *, sw=PT_MED, head=8):
+    import math
+    ang = math.atan2(y2 - y1, x2 - x1)
+    bx, by = x2 - head * math.cos(ang), y2 - head * math.sin(ang)
+    px, py = -math.sin(ang) * head * 0.42, math.cos(ang) * head * 0.42
+    return (f'<line x1="{x1}" y1="{y1}" x2="{bx:.1f}" y2="{by:.1f}" stroke="{ink}" '
+            f'stroke-width="{sw}"/>'
+            f'<path d="M {x2} {y2} L {bx + px:.1f} {by + py:.1f} '
+            f'L {bx - px:.1f} {by - py:.1f} Z" fill="{ink}"/>')
+
+
+def p_fig(x, y, label, ink, *, sub=""):
+    out = p_txt(x, y, label, ink, size=15, weight=700, spacing="1.2")
+    if sub:
+        out += p_txt(x + 82, y, sub, ink, size=11.5, weight=500)
+    return out
+
+
+def p_cyl(x, y, w, h, ink, label, *, sw=PT_MED):
+    """A data store, drawn the way patents draw one."""
+    ry = 9
+    return (f'<path d="M {x} {y + ry} a {w / 2} {ry} 0 0 1 {w} 0 v {h - 2 * ry} '
+            f'a {w / 2} {ry} 0 0 1 {-w} 0 Z" fill="none" stroke="{ink}" '
+            f'stroke-width="{sw}"/>'
+            f'<path d="M {x} {y + ry} a {w / 2} {ry} 0 0 0 {w} 0" fill="none" '
+            f'stroke="{ink}" stroke-width="{sw}"/>'
+            + p_txt(x + w / 2, y + h / 2 + 8, label, ink, size=10, anchor="middle"))
+
+
+def p_diamond(cx, cy, w, h, ink, lines, *, sw=PT_MED):
+    out = [f'<path d="M {cx} {cy - h / 2} L {cx + w / 2} {cy} L {cx} {cy + h / 2} '
+           f'L {cx - w / 2} {cy} Z" fill="none" stroke="{ink}" stroke-width="{sw}"/>']
+    n = len(lines)
+    for i, ln in enumerate(lines):
+        out.append(p_txt(cx, cy + 4 + (i - (n - 1) / 2) * 12, ln, ink,
+                         size=9.5, anchor="middle"))
+    return "".join(out)
+
+
+def p_step(x, y, w, h, ink, lines, *, rx=0, sw=PT_MED):
+    out = [p_rect(x, y, w, h, ink, rx=rx, sw=sw)]
+    n = len(lines)
+    for i, ln in enumerate(lines):
+        out.append(p_txt(x + w / 2, y + h / 2 + 4 + (i - (n - 1) / 2) * 12, ln, ink,
+                         size=10, anchor="middle"))
+    return "".join(out)
+
+
+def p_sheet(t, n, total, w, h, body, title):
+    ink = t["ink"]
+    frame = (p_rect(14, 14, w - 28, h - 28, ink, sw=PT_THIN, fill="none")
+             + p_txt(w - 26, 36, f"SHEET {n} OF {total}", ink, size=10.5,
+                     anchor="end", weight=700, family=MONO, spacing="1")
+             + p_txt(26, 36, "WEIR  —  INTENT-ADDRESSED FORWARDING APPARATUS", ink,
+                     size=10.5, weight=700, family=MONO, spacing="1")
+             + line(14, 46, w - 14, 46, stroke=ink, sw=PT_THIN))
+    note = p_txt(26, h - 24,
+                 "Patent drawing convention. Not a filing, not a granted patent, "
+                 "no application pending.", ink, size=9.5, opacity=0.75)
+    return svg(w, h, frame + body + note, title=title)
+
+
+# --- FIG. 1  system topology ----------------------------------------------
+
+def _fig1(t, oy):
+    ink = t["ink"]
+    b = [p_fig(30, oy, "FIG. 1", ink, sub="SYSTEM OVERVIEW")]
+    y, bh = oy + 34, 84
+
+    # 100 agent fleet
+    b.append(p_rect(34, y, 150, bh, ink, sw=PT_THICK))
+    b.append(p_txt(109, y + 22, "AGENT FLEET", ink, size=10.5, anchor="middle",
+                   weight=700))
+    for i in range(3):
+        cy = y + 40 + i * 15
+        b.append(p_rect(58, cy - 6, 102, 12, ink, sw=PT_THIN))
+    b.append(p_ref(109, y - 10, (109, y), 100, ink))
+    b.append(p_ref(44, y + bh + 22, (70, y + 48), 102, ink))
+
+    b.append(p_arrow(184, y + bh / 2, 232, y + bh / 2, ink))
+    b.append(p_ref(208, y + bh / 2 - 16, (208, y + bh / 2 - 2), 104, ink))
+
+    # 200 egress apparatus
+    b.append(p_rect(232, y, 158, bh, ink, sw=PT_THICK))
+    b.append(p_txt(311, y + 24, "WEIR APPARATUS", ink, size=10.5, anchor="middle",
+                   weight=700))
+    b.append(p_txt(311, y + 40, "(EGRESS)", ink, size=9.5, anchor="middle"))
+    b.append(p_txt(311, y + 60, "BUDGET · LOOPS · WIDTH", ink, size=8.5,
+                   anchor="middle"))
+    b.append(p_ref(311, y - 10, (311, y), 200, ink))
+
+    b.append(p_arrow(390, y + bh / 2, 438, y + bh / 2, ink))
+
+    # 300 network cloud
+    cx, cy = 512, y + bh / 2
+    b.append(f'<path d="M {cx - 56} {cy + 14} a 20 20 0 0 1 2 -38 a 26 26 0 0 1 46 -16 '
+             f'a 24 24 0 0 1 42 12 a 19 19 0 0 1 0 42 Z" fill="none" stroke="{ink}" '
+             f'stroke-width="{PT_MED}"/>')
+    b.append(p_txt(cx + 6, cy + 4, "NETWORK", ink, size=9.5, anchor="middle"))
+    b.append(p_ref(cx + 6, y - 10, (cx + 6, cy - 26), 300, ink))
+
+    b.append(p_arrow(590, y + bh / 2, 638, y + bh / 2, ink))
+
+    # 400 ingress apparatus
+    b.append(p_rect(638, y, 158, bh, ink, sw=PT_THICK))
+    b.append(p_txt(717, y + 24, "WEIR APPARATUS", ink, size=10.5, anchor="middle",
+                   weight=700))
+    b.append(p_txt(717, y + 40, "(INGRESS)", ink, size=9.5, anchor="middle"))
+    b.append(p_txt(717, y + 60, "TERMS · ADMISSION", ink, size=8.5, anchor="middle"))
+    b.append(p_ref(717, y - 10, (717, y), 400, ink))
+
+    b.append(p_arrow(796, y + bh / 2, 844, y + bh / 2, ink))
+
+    # 500 upstream
+    b.append(p_rect(844, y, 108, bh, ink, sw=PT_THICK))
+    b.append(p_txt(898, y + 30, "INFERENCE", ink, size=10.5, anchor="middle",
+                   weight=700))
+    b.append(p_txt(898, y + 46, "SERVERS", ink, size=10.5, anchor="middle",
+                   weight=700))
+    b.append(p_ref(898, y - 10, (898, y), 500, ink))
+    return "".join(b), y + bh + 40
+
+
+# --- FIG. 2  the apparatus -------------------------------------------------
+
+def _fig2(t, oy):
+    ink = t["ink"]
+    b = [p_fig(30, oy, "FIG. 2", ink, sub="APPARATUS — FRONT ELEVATION AND PLAN VIEW")]
+
+    # front elevation
+    y = oy + 30
+    b.append(p_txt(34, y + 10, "FRONT ELEVATION", ink, size=9, weight=700,
+                   family=MONO, spacing="1"))
+    fy, fh = y + 20, 56
+    b.append(p_rect(34, fy, 884, fh, ink, sw=PT_THICK))
+    # rack ears
+    for ex in (34, 902):
+        b.append(p_rect(ex - 16, fy + 6, 16, fh - 12, ink, sw=PT_MED))
+        for hy in (fy + 16, fy + fh - 20):
+            b.append(f'<circle cx="{ex - 8}" cy="{hy}" r="3.4" fill="none" '
+                     f'stroke="{ink}" stroke-width="{PT_THIN}"/>')
+    b.append(p_ref(26, fy + fh + 20, (24, fy + fh - 10), 202, ink))
+    # status LEDs
+    for i in range(4):
+        b.append(f'<circle cx="{58 + i * 16}" cy="{fy + 28}" r="4" fill="none" '
+                 f'stroke="{ink}" stroke-width="{PT_THIN}"/>')
+    b.append(p_ref(70, fy + fh + 20, (70, fy + 34), 204, ink))
+    # ports
+    for i in range(2):
+        b.append(p_rect(360 + i * 62, fy + 16, 46, 24, ink, sw=PT_MED))
+        b.append(p_rect(366 + i * 62, fy + 22, 34, 12, ink, sw=PT_THIN))
+    b.append(p_ref(391, fy + fh + 20, (391, fy + 42), 206, ink))
+    b.append(p_rect(500, fy + 20, 34, 16, ink, sw=PT_MED))
+    b.append(p_ref(517, fy + fh + 20, (517, fy + 38), 208, ink))
+    # PSUs
+    for i in range(2):
+        b.append(p_rect(742 + i * 84, fy + 12, 74, 32, ink, sw=PT_MED))
+        b.append(f'<circle cx="{779 + i * 84}" cy="{fy + 28}" r="10" fill="none" '
+                 f'stroke="{ink}" stroke-width="{PT_THIN}"/>')
+    b.append(p_ref(863, fy - 8, (863, fy + 12), 260, ink))
+
+    # plan view (cover removed)
+    py = fy + fh + 44
+    b.append(p_txt(34, py, "PLAN VIEW — COVER REMOVED", ink, size=9, weight=700,
+                   family=MONO, spacing="1"))
+    py += 12
+    ph = 232
+    b.append(p_rect(34, py, 884, ph, ink, sw=PT_THICK))
+
+    def blk(x, y_, w, h, num, lines, numpos, leadto, *, sw=PT_MED, dash=None):
+        out = [p_rect(x, y_, w, h, ink, sw=sw, dash=dash)]
+        n = len(lines)
+        for i, ln in enumerate(lines):
+            out.append(p_txt(x + w / 2, y_ + h / 2 + 4 + (i - (n - 1) / 2) * 11, ln,
+                             ink, size=9, anchor="middle"))
+        out.append(p_ref(numpos[0], numpos[1], leadto, num, ink))
+        return "".join(out)
+
+    b.append(blk(56, py + 22, 150, 74, 210,
+                 ["NETWORK INTERFACE", "WITH TLS OFFLOAD", "(DPU / SmartNIC)"],
+                 (131, py + 8), (131, py + 22)))
+    b.append(blk(72, py + 104, 118, 40, 212,
+                 ["STATELESS-PREFIX", "CLASSIFIER"], (131, py + 164),
+                 (131, py + 144), dash="5 4"))
+
+    b.append(blk(236, py + 40, 172, 120, 220,
+                 ["HOST PROCESSOR", "COMPLEX", "", "PIPELINE STAGES", "6 – 12"],
+                 (322, py + 24), (322, py + 40)))
+
+    b.append(blk(438, py + 40, 124, 56, 230,
+                 ["MAIN MEMORY", "(ROOT LEDGER)"], (500, py + 24), (500, py + 40)))
+    b.append(blk(438, py + 108, 124, 52, 240,
+                 ["NVMe RECEIPT", "SPOOL"], (500, py + 178), (500, py + 160)))
+
+    b.append(blk(592, py + 40, 104, 44, 250, ["TPM / HSM"], (644, py + 24),
+                 (644, py + 40)))
+    b.append(blk(592, py + 100, 104, 60, 280, ["PCIe", "BACKPLANE"],
+                 (644, py + 178), (644, py + 160)))
+
+    for i in range(2):
+        b.append(p_rect(726 + i * 84, py + 40, 74, 120, ink, sw=PT_MED))
+        b.append(p_txt(763 + i * 84, py + 96, "PSU", ink, size=9, anchor="middle"))
+        b.append(p_txt(763 + i * 84, py + 110, f"{i + 1} OF 2", ink, size=8,
+                       anchor="middle"))
+    b.append(p_ref(847, py + 178, (847, py + 160), 262, ink))
+
+    # fans
+    for i in range(4):
+        fx = 60 + i * 38
+        b.append(f'<circle cx="{fx}" cy="{py + 200}" r="13" fill="none" '
+                 f'stroke="{ink}" stroke-width="{PT_THIN}"/>')
+        b.append(f'<circle cx="{fx}" cy="{py + 200}" r="4" fill="none" '
+                 f'stroke="{ink}" stroke-width="{PT_THIN}"/>')
+    b.append(p_ref(36, py + 224, (60, py + 200), 270, ink))
+
+    # interconnect lines
+    b.append(line(206, py + 59, 236, py + 59, stroke=ink, sw=PT_MED))
+    b.append(line(408, py + 68, 438, py + 68, stroke=ink, sw=PT_MED))
+    b.append(line(408, py + 130, 438, py + 130, stroke=ink, sw=PT_MED))
+    b.append(line(562, py + 62, 592, py + 62, stroke=ink, sw=PT_MED))
+    b.append(line(562, py + 130, 592, py + 130, stroke=ink, sw=PT_MED))
+    return "".join(b), py + ph + 34
+
+
+def build_patent1(t: dict) -> str:
+    W = 980
+    f1, y1 = _fig1(t, 78)
+    f2, y2 = _fig2(t, y1)
+    return p_sheet(t, 1, 3, W, y2 + 24, f1 + f2,
+                   "Patent-style figures, sheet 1: system overview and apparatus")
+
+
+
+# --- FIG. 3  functional block diagram, offload boundary --------------------
+
+def _fig3(t, oy):
+    ink = t["ink"]
+    b = [p_fig(30, oy, "FIG. 3", ink, sub="FUNCTIONAL BLOCK DIAGRAM")]
+
+    # interface band with the stateless prefix
+    ny = oy + 46
+    by = oy + 56
+    b.append(p_rect(40, by, 900, 84, ink, sw=PT_THICK))
+    b.append(p_txt(52, by + 34, "NETWORK", ink, size=9, weight=700))
+    b.append(p_txt(52, by + 48, "INTERFACE", ink, size=9, weight=700))
+    b.append(p_txt(52, by + 62, "TLS OFFLOAD", ink, size=9, weight=700))
+    b.append(p_ref(90, oy + 30, (90, by), 210, ink))
+
+    b.append(p_rect(200, by + 10, 724, 64, ink, sw=PT_MED, dash="6 4"))
+    b.append(p_ref(176, by + 82, (200, by + 60), 212, ink))
+    prefix = [("PARSE", 302), ("VERIFY", 304), ("LOOP /", 306),
+              ("DEADLINE", 308), ("TERMS", 310)]
+    sub2 = ["HEADER", "ATTESTATION", "DEPTH", "CHECK", "CHECK"]
+    for i, ((nm, num), s2) in enumerate(zip(prefix, sub2)):
+        x = 211 + i * 142
+        b.append(p_rect(x, by + 22, 134, 40, ink, sw=PT_MED))
+        b.append(p_txt(x + 67, by + 38, nm, ink, size=9.5, anchor="middle",
+                       weight=600))
+        b.append(p_txt(x + 67, by + 52, s2, ink, size=8.5, anchor="middle"))
+        b.append(p_ref(x + 67, ny - 10, (x + 67, by + 22), num, ink))
+
+    # the boundary itself
+    ly = by + 108
+    b.append(line(40, ly, 940, ly, stroke=ink, sw=PT_MED, dash="9 6"))
+    b.append(p_txt(48, ly - 8, "OFFLOAD BOUNDARY — NO SHARED MUTABLE STATE ABOVE",
+                   ink, size=9, weight=700, family=MONO, spacing="0.6"))
+    b.append(p_ref(906, ly - 14, (906, ly), 214, ink))
+
+    # host band
+    hy = ly + 38
+    b.append(p_rect(40, hy, 900, 124, ink, sw=PT_THICK))
+    b.append(p_txt(52, hy + 18, "HOST PROCESSOR COMPLEX", ink, size=9,
+                   weight=700, family=MONO, spacing="0.6"))
+    b.append(p_ref(60, hy - 14, (60, hy), 220, ink))
+    host = [("ROUTE", "SELECT", 312), ("LEDGER", "DEBIT", 314),
+            ("ADMISSION", "CONTROL", 316), ("INTENT", "COALESCE", 318),
+            ("FORWARD", "UPSTREAM", 320), ("SETTLE", "OBSERVED", 322),
+            ("RECEIPT", "WRITER", 324)]
+    for i, (nm, s2, num) in enumerate(host):
+        x = 60 + i * 124
+        b.append(p_rect(x, hy + 30, 116, 48, ink, sw=PT_MED))
+        b.append(p_txt(x + 58, hy + 50, nm, ink, size=9.5, anchor="middle",
+                       weight=600))
+        b.append(p_txt(x + 58, hy + 64, s2, ink, size=8.5, anchor="middle"))
+        b.append(p_ref(x + 58, hy + 106, (x + 58, hy + 78), num, ink))
+        if i:
+            b.append(p_arrow(x - 8, hy + 54, x, hy + 54, ink, sw=PT_THIN, head=6))
+
+    # persistent stores
+    sy = hy + 156
+    stores = [("ROOT LEDGER", 330, 118), ("KEY STORE (TPM)", 332, 366),
+              ("INTENT CACHE", 334, 614), ("RECEIPT CHAIN", 336, 862)]
+    for nm, num, cx in stores:
+        b.append(p_cyl(cx - 75, sy, 150, 62, ink, nm))
+        b.append(p_ref(cx, sy + 88, (cx, sy + 62), num, ink))
+    # tie stores to the stages that own them
+    for cx, sx in ((118, 60 + 1 * 124 + 100), (366, 60 + 2 * 124 + 100),
+                   (614, 60 + 3 * 124 + 100), (862, 60 + 6 * 124 + 100)):
+        b.append(line(cx, sy, cx, sy - 14, stroke=ink, sw=PT_THIN, dash="4 3"))
+        b.append(line(cx, sy - 14, sx, sy - 14, stroke=ink, sw=PT_THIN, dash="4 3"))
+        b.append(line(sx, sy - 14, sx, hy + 78, stroke=ink, sw=PT_THIN, dash="4 3"))
+    return "".join(b), sy + 104
+
+
+# --- FIG. 4  header format -------------------------------------------------
+
+def _fig4(t, oy):
+    ink = t["ink"]
+    b = [p_fig(30, oy, "FIG. 4", ink, sub="INTENT HEADER FORMAT (WIH-0, BINARY)")]
+    gx, gw = 150, 700
+    y = oy + 46
+    # bit ruler
+    for bit in (0, 8, 16, 24, 32):
+        x = gx + gw * bit / 32
+        b.append(line(x, y + 8, x, y + 16, stroke=ink, sw=PT_THIN))
+        b.append(p_txt(x, y + 4, str(bit if bit < 32 else 31), ink, size=8.5,
+                       anchor="middle", family=MONO))
+    b.append(p_txt(gx - 10, y + 4, "BIT", ink, size=8.5, anchor="end",
+                   family=MONO, weight=700))
+
+    rows = [
+        ([("VER", 8), ("FLAGS", 8), ("DEPTH", 8), ("PATH LEN", 8)], 602),
+        ([("ROOT IDENTIFIER  (128)", 32)], 604),
+        ([("DEADLINE, MILLISECONDS  (64)", 32)], 606),
+        ([("BUDGET  (32)", 16), ("DECLARED COST  (32)", 16)], 608),
+        ([("CAPABILITY IDENTIFIER  (32)", 32)], 610),
+        ([("PRINCIPAL IDENTIFIER  (128)", 32)], 612),
+        ([("INTENT DIGEST  (128)", 32)], 614),
+        ([("DELEGATION PATH VECTOR  (64 x n)", 32)], 616),
+        ([("ATTESTATION  (128 OR 512)", 32)], 618),
+    ]
+    ry, rh = y + 22, 32
+    for cells, num in rows:
+        cx = gx
+        for nm, span in cells:
+            w = gw * span / 32
+            b.append(p_rect(cx, ry, w, rh, ink, sw=PT_MED))
+            b.append(p_txt(cx + w / 2, ry + rh / 2 + 4, nm, ink, size=9,
+                           anchor="middle", family=MONO, weight=600))
+            cx += w
+        b.append(p_ref(gx + gw + 46, ry + rh / 2 + 4, (gx + gw, ry + rh / 2),
+                       num, ink))
+        ry += rh
+
+    b.append(line(gx, ry + 10, gx + gw, ry + 10, stroke=ink, sw=PT_THIN, dash="4 3"))
+    b.append(p_txt(gx, ry + 28,
+                   "FIELDS 602–610 CARRY EVERY DROP DECISION. A CONFORMING "
+                   "APPARATUS MAY REFUSE ON THE FIRST 24 OCTETS ALONE.",
+                   ink, size=8.5, family=MONO, spacing="0.4"))
+    return "".join(b), ry + 44
+
+
+def build_patent2(t: dict) -> str:
+    W = 980
+    f3, y1 = _fig3(t, 78)
+    f4, y2 = _fig4(t, y1 + 16)
+    return p_sheet(t, 2, 3, W, y2 + 24, f3 + f4,
+                   "Patent-style figures, sheet 2: block diagram and header format")
+
+
+
+# --- FIG. 5  method of forwarding ------------------------------------------
+
+def _fig5(t, oy):
+    ink = t["ink"]
+    b = [p_fig(30, oy, "FIG. 5", ink, sub="METHOD OF FORWARDING")]
+    cx, bw = 172, 232          # main column
+    rx, rw = 386, 140          # refusal column
+    y = oy + 40
+    step_h, gap = 36, 26
+
+    def centre(yy):
+        return yy + step_h / 2
+
+    def refusal(yy, num, lines, label):
+        """A terminal refusal, branching right off the main column."""
+        out = [p_rect(rx, yy, rw, step_h, ink, sw=PT_MED)]
+        n = len(lines)
+        for i, ln in enumerate(lines):
+            out.append(p_txt(rx + rw / 2, centre(yy) + 4 + (i - (n - 1) / 2) * 11,
+                             ln, ink, size=8.5, anchor="middle"))
+        out.append(p_arrow(cx + bw / 2 + 56, centre(yy), rx, centre(yy), ink,
+                           sw=PT_THIN, head=6))
+        out.append(p_txt(cx + bw / 2 + 62, centre(yy) - 6, label, ink, size=8,
+                         family=MONO))
+        out.append(p_ref(rx + rw + 32, centre(yy) + 4, (rx + rw, centre(yy)),
+                         num, ink))
+        return "".join(out)
+
+    seq = [
+        ("step", ["RECEIVE REQUEST"], 700, None, None),
+        ("step", ["PARSE INTENT HEADER"], 702, None, None),
+        ("test", ["WELL", "FORMED?"], 704, ("NO", 750, ["REFUSE", "MALFORMED"]), None),
+        ("test", ["ATTESTATION", "VALID?"], 706, ("NO", 752, ["REFUSE", "BAD ATTESTATION"]), None),
+        ("test", ["SELF IN PATH", "VECTOR?"], 708, ("YES", 754, ["REFUSE", "DELEGATION LOOP"]), None),
+        ("test", ["DEPTH = 0 OR", "DEADLINE PAST?"], 710, ("YES", 756, ["REFUSE", "EXPIRED"]), None),
+        ("test", ["TERMS", "PERMIT?"], 712, ("NO", 758, ["REFUSE", "TERMS DENIED"]), None),
+        ("step", ["SELECT ROUTE BY", "CAPABILITY"], 714, None, None),
+        ("test", ["ROOT BUDGET", "SUFFICIENT?"], 716, ("NO", 760, ["REFUSE", "BUDGET EXHAUSTED"]), None),
+        ("test", ["CAPACITY", "AVAILABLE?"], 718, ("NO", 762, ["ISSUE APPOINTMENT", "CHARGE REFUSAL"]), None),
+        ("test", ["IDENTICAL INTENT", "IN FLIGHT?"], 720, ("YES", 764, ["JOIN, RETURN", "SHARED RESULT"]), None),
+        ("step", ["FORWARD TO UPSTREAM"], 722, None, None),
+        ("step", ["SETTLE OBSERVED COST"], 724, None, None),
+        ("step", ["APPEND RECEIPT"], 726, None, None),
+        ("step", ["RETURN RESPONSE"], 728, None, None),
+    ]
+
+    prev_bottom = None
+    for kind, lines, num, branch, _ in seq:
+        h = step_h if kind == "step" else 48
+        if kind == "test":
+            b.append(p_diamond(cx, y + h / 2, bw, h, ink, lines))
+            nx = cx - bw / 2 - 30
+        else:
+            b.append(p_step(cx - bw / 2, y, bw, h, ink, lines,
+                            rx=step_h / 2 if num in (700, 728) else 0))
+            nx = cx - bw / 2 - 30
+        b.append(p_ref(nx, y + h / 2 + 4, (cx - bw / 2, y + h / 2), num, ink))
+        if prev_bottom is not None:
+            b.append(p_arrow(cx, prev_bottom, cx, y, ink, sw=PT_THIN, head=6))
+        if branch:
+            label, bnum, blines = branch
+            b.append(refusal(y + h / 2 - step_h / 2, bnum, blines, label))
+        prev_bottom = y + h
+        y += h + gap
+
+    return "".join(b), y
+
+
+# --- FIG. 6  appointment sequence ------------------------------------------
+
+def _fig6(t, ox, oy):
+    ink = t["ink"]
+    b = [p_fig(ox, oy, "FIG. 6", ink, sub="APPOINTMENT SEQUENCE")]
+    lanes = [("CALLER", 800, ox + 30), ("APPARATUS", 200, ox + 160),
+             ("UPSTREAM", 500, ox + 290)]
+    top = oy + 34
+    bottom = oy + 512
+    for nm, num, x in lanes:
+        b.append(p_rect(x - 52, top, 104, 30, ink, sw=PT_MED))
+        b.append(p_txt(x, top + 20, nm, ink, size=9, anchor="middle", weight=700))
+        b.append(line(x, top + 30, x, bottom, stroke=ink, sw=PT_THIN, dash="5 4"))
+        b.append(p_ref(x, top - 10, (x, top), num, ink))
+
+    cxs = [l[2] for l in lanes]
+
+    def msg(yy, a, c, label, num, *, back=False, note=""):
+        x1, x2 = cxs[a], cxs[c]
+        out = [p_arrow(x1, yy, x2, yy, ink, sw=PT_MED, head=7)]
+        mx = (x1 + x2) / 2
+        out.append(p_txt(mx, yy - 7, label, ink, size=8.5, anchor="middle"))
+        if note:
+            out.append(p_txt(mx, yy + 12, note, ink, size=7.5, anchor="middle"))
+        nx = max(x1, x2) + 42
+        out.append(p_ref(nx, yy + 4, (max(x1, x2), yy), num, ink))
+        return "".join(out)
+
+    y = top + 60
+    b.append(msg(y, 0, 1, "REQUEST", 802))
+    y += 46
+    b.append(msg(y, 1, 0, "REFUSAL + SIGNED", 804, note="APPOINTMENT FOR t1"))
+    y += 58
+    b.append(msg(y, 0, 1, "PREMATURE RETRY", 806))
+    y += 46
+    b.append(msg(y, 1, 0, "REFUSED, CREDITS", 808, note="CHARGED; SLOT UNCHANGED"))
+    y += 62
+
+    # the waiting interval
+    b.append(line(cxs[0] - 16, y - 22, cxs[0] + 16, y - 22, stroke=ink, sw=PT_THIN))
+    b.append(line(cxs[0] - 16, y + 18, cxs[0] + 16, y + 18, stroke=ink, sw=PT_THIN))
+    # close the interval into a dimension line, or it reads as two loose ticks
+    b.append(line(cxs[0] + 16, y - 22, cxs[0] + 16, y + 18, stroke=ink, sw=PT_THIN))
+    b.append(p_txt(cxs[0] - 22, y + 2, "t1", ink, size=9, anchor="end",
+                   family=MONO, weight=700))
+    b.append(p_ref(cxs[0] + 54, y + 4, (cxs[0] + 16, y), 810, ink))
+
+    y += 40
+    b.append(msg(y, 0, 1, "PUNCTUAL ARRIVAL", 812))
+    y += 46
+    b.append(msg(y, 1, 2, "ADMITTED, FORWARDED", 814))
+    y += 46
+    b.append(msg(y, 2, 1, "RESULT", 816))
+    y += 46
+    b.append(msg(y, 1, 0, "RESPONSE + RECEIPT", 818))
+
+    b.append(p_txt(ox, bottom + 26,
+                   "PREMATURE RETRY (806) CANNOT ADVANCE t1.",
+                   ink, size=8.5, family=MONO, spacing="0.3"))
+    b.append(p_txt(ox, bottom + 40,
+                   "WAITING IS THEREFORE BOTH CHEAPER AND FASTER.",
+                   ink, size=8.5, family=MONO, spacing="0.3"))
+    return "".join(b), bottom + 56
+
+
+# --- FIG. 7  budget conservation across fan-out ----------------------------
+
+def _fig7(t, ox, oy):
+    """The mechanism the other figures do not show: a swarm cannot outspend
+    its root, because fan-out divides a budget instead of multiplying one."""
+    ink = t["ink"]
+    b = [p_fig(ox, oy, "FIG. 7", ink, sub="BUDGET CONSERVATION")]
+    cx = ox + 172
+    r = 11
+
+    def node(x, y, *, funded=True):
+        return (f'<circle cx="{x}" cy="{y}" r="{r}" fill="none" stroke="{ink}" '
+                f'stroke-width="{PT_MED if funded else PT_THIN}"'
+                + ('' if funded else ' stroke-dasharray="3 3"') + '/>')
+
+    y0, y1, y2, y3 = oy + 52, oy + 122, oy + 192, oy + 268
+    b.append(node(cx, y0))
+    b.append(p_ref(cx - 54, y0 + 4, (cx - r, y0), 900, ink))
+    b.append(p_txt(cx + 26, y0 + 4, "ROOT GRANT", ink, size=8, family=MONO))
+
+    l1 = [cx - 96, cx, cx + 96]
+    for x in l1:
+        b.append(node(x, y1))
+        b.append(line(cx, y0 + r, x, y1 - r, stroke=ink, sw=PT_THIN))
+
+    l2 = []
+    for i, px in enumerate(l1):
+        for j in (-32, 0, 32):
+            x = px + j
+            l2.append(x)
+            b.append(node(x, y2))
+            b.append(line(px, y1 + r, x, y2 - r, stroke=ink, sw=PT_THIN))
+    b.append(p_ref(ox + 6, y2 + 4, (min(l2) - r, y2), 902, ink))
+
+    # the level at which the grant is exhausted
+    ey = (y2 + y3) / 2
+    b.append(line(ox + 4, ey, ox + 340, ey, stroke=ink, sw=PT_MED, dash="8 5"))
+    # below the line, not above it: above, the descendants' drop lines run
+    # straight through the lettering
+    b.append(p_txt(ox + 4, ey + 15, "ROOT GRANT EXHAUSTED", ink, size=8.5,
+                   weight=700, family=MONO, spacing="0.4"))
+    b.append(p_ref(ox + 322, ey + 20, (ox + 322, ey), 906, ink))
+
+    l3 = [ox + 22 + i * 26 for i in range(13)]
+    for x in l3:
+        b.append(node(x, y3, funded=False))
+    for px in l2:
+        b.append(line(px, y2 + r, px, ey, stroke=ink, sw=PT_THIN))
+    b.append(p_ref(ox + 6, y3 + 42, (l3[0] - r + 4, y3 + r), 904, ink))
+
+    b.append(p_txt(ox, y3 + 74,
+                   "REFUSED AT THE EDGE (904). NO UPSTREAM CALL IS MADE,",
+                   ink, size=8.5, family=MONO, spacing="0.3"))
+    b.append(p_txt(ox, y3 + 88,
+                   "AND A REFUSED NODE ISSUES NO CHILDREN OF ITS OWN.",
+                   ink, size=8.5, family=MONO, spacing="0.3"))
+    return "".join(b), y3 + 104
+
+
+def build_patent3(t: dict) -> str:
+    W = 980
+    f5, y5 = _fig5(t, 78)
+    f6, y6 = _fig6(t, 606, 78)
+    f7, y7 = _fig7(t, 606, y6 + 34)
+    h = max(y5, y7) + 26
+    body = f5 + f6 + f7 + line(578, 70, 578, h - 40, stroke=t["ink"], sw=PT_THIN,
+                               dash="3 5")
+    return p_sheet(t, 3, 3, W, h, body,
+                   "Patent-style figures, sheet 3: method flowchart and appointment sequence")
+
+
 BUILDERS = {
     "logo": build_logo,
     "banner": build_banner,
@@ -449,6 +1068,9 @@ BUILDERS = {
     "header": build_header,
     "topology": build_topology,
     "internals": build_internals,
+    "patent1": build_patent1,
+    "patent2": build_patent2,
+    "patent3": build_patent3,
 }
 
 
