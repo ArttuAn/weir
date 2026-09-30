@@ -119,6 +119,7 @@ class Router:
         self.counters = {
             "seen": 0, "forwarded": 0, "refused": 0,
             "coalesced": 0, "cached": 0, "credits_settled": 0,
+            "failed": 0,
         }
 
     # -- configuration -------------------------------------------------
@@ -146,7 +147,11 @@ class Router:
         fanout_key = self._fanout_enter(intent)
 
         # Every stage past this point holds the fan-out slot, so each of them
-        # has to give it back on the way out.
+        # has to give it back on the way out.  BaseException rather than
+        # Refused: a stage that raises anything else - a bug in terms, a
+        # KeyError from a route table edited underneath us - would otherwise
+        # leave the width counter permanently inflated, and the delegator
+        # throttled by a slot nobody is holding until the root aged out.
         try:
             self.sched.check_feasible(intent, queue_wait=self._queue_wait())
 
@@ -158,7 +163,7 @@ class Router:
                 reserved = self.ledger.reserve(intent.root, intent.principal, cost)
             except InsufficientBudget as exc:
                 raise Refused(Reason.BUDGET_EXHAUSTED, str(exc)) from exc
-        except Refused:
+        except BaseException:
             self._fanout_exit(fanout_key)
             raise
 
@@ -417,7 +422,13 @@ class Admission:
 
         name = {"miss": "forwarded", "joined": "coalesced", "hit": "cached"}[disposition]
         if failed:
-            name = "forwarded"
+            # An upstream call that died is not a forwarding. The request was
+            # handed to the origin and the origin did not answer, which is the
+            # one thing an operator watching this router most needs to see; a
+            # counter that adds it to "forwarded" is how an upstream outage
+            # gets reported as a hundred per cent success rate. The receipt says
+            # so for the same reason - the log is the audit trail.
+            name = "failed"
         r.counters[name] += 1
         r.receipts.record(self.intent, name, credits=cost)
         return Decision(ok=True, intent=self.intent, route=self.route, result=result,

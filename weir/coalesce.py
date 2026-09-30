@@ -25,6 +25,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .errors import Reason, Refused
 from .intent import Intent
 
 
@@ -95,7 +96,18 @@ class Coalescer:
 
     def join(self, flight: _Flight, intent: Intent) -> Any:
         """Wait for the leader's result. Raises whatever the leader raised."""
-        flight.event.wait(timeout=max(0.0, intent.deadline - self._clock.now()))
+        left = max(0.0, intent.deadline - self._clock.now())
+        if not flight.event.wait(timeout=left):
+            # The leader has not answered by the time this caller's answer
+            # stopped being worth having. Returning ``flight.result`` here hands
+            # back the _Flight's initial ``None`` as though it were the answer:
+            # a 200 with an empty body, indistinguishable from a real one, for
+            # work nobody did - and billed at zero, because the coalesced path
+            # assumes a result was shared. A deadline that has passed is exactly
+            # what this is, so it is refused as exactly that.
+            raise Refused(Reason.DEADLINE_PASSED,
+                          f"coalesced leader did not answer within {left:.3f}s; "
+                          "the answer is no longer worth having")
         if flight.error is not None:
             raise flight.error
         return flight.result

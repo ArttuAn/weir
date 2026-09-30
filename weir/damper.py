@@ -357,7 +357,6 @@ class Damper:
             "refused": self.refused,
             "shed": self.shed,
             "reneged": self.reneged,
-            "shed": self.shed,
             "early_retries": self.early_retries,
             "appointments_kept": self.appointments_kept,
             "credits_burned": self.credits_burned,

@@ -16,13 +16,14 @@ every agent on the internet has been rewritten is a router that never ships.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .errors import Refused
+from .errors import Reason, Refused
 from .intent import MalformedIntent, from_headers, to_headers
 from .router import Router
 
@@ -55,18 +56,34 @@ def make_handler(router: Router):
             if self.path == "/_weir/housekeep":
                 return self._send(200, router.housekeep())
             if self.path == "/_weir/routes":
-                return self._send(200, {"routes": [r.__dict__ for r in router.fib.routes()]})
+                # asdict, not __dict__: Route is a slots dataclass and has no
+                # instance dict to read.
+                return self._send(200, {"routes": [dataclasses.asdict(r)
+                                                  for r in router.fib.routes()]})
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
-            length = int(self.headers.get("content-length") or 0)
+            raw_len = self.headers.get("content-length") or "0"
+            try:
+                length = int(raw_len)
+                if length < 0:
+                    raise ValueError(raw_len)
+            except ValueError:
+                # The framing itself is what is broken. The body length is
+                # unknown, so the bytes already sitting in the socket cannot be
+                # located and a keep-alive client would parse them as the next
+                # request. Answer, then hang up rather than guess.
+                self.close_connection = True
+                return self._send(400, {"reason": Reason.MALFORMED,
+                                        "detail": f"bad content-length {raw_len!r}"},
+                                  {"Connection": "close"})
             body = self.rfile.read(length) if length else b""
             headers = {k.lower(): v for k, v in self.headers.items()}
 
             try:
                 intent = from_headers(headers)
             except MalformedIntent as exc:
-                return self._send(400, {"reason": "malformed-intent", "detail": str(exc)})
+                return self._send(400, {"reason": Reason.MALFORMED, "detail": str(exc)})
 
             ticket = headers.get("weir-appointment")
 
@@ -79,7 +96,22 @@ def make_handler(router: Router):
                         router.clock.now()))) as resp:
                     return {"status": resp.status, "body": resp.read().decode("utf-8", "replace")}
 
-            decision = router.forward(intent, ticket, upstream=upstream)
+            try:
+                decision = router.forward(intent, ticket, upstream=upstream)
+            except Refused as exc:
+                # The pipeline turns refusals into decisions; a Refused escaping
+                # it is a bug, not a wire condition, so it is not answered as one.
+                return self._send(500, {"reason": "internal-refusal",
+                                        "detail": str(exc)})
+            except Exception as exc:
+                # The upstream died.  The router has already released the slot
+                # and written the receipt, so all that is left is to tell the
+                # caller - an unmodified client that sees the connection close
+                # has learned nothing except that weir is flaky, and retries
+                # blindly.  502 says the failure was downstream of the weir.
+                return self._send(502, {"reason": "upstream-failed",
+                                        "detail": f"{type(exc).__name__}: {exc}"},
+                                  {"weir-now": f"{router.clock.now():.3f}"})
 
             # The router's own clock, on every response. A caller that subtracts
             # its own wall clock from a router timestamp folds clock skew
