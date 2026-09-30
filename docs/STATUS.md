@@ -15,7 +15,7 @@ Everything here is exercised by `tests/` (46 tests, stdlib `unittest`) and by
 | Root budget ledger, reserve/settle | `ledger.py` | Thread-safe; concurrency tested |
 | Metered refusal, signed appointments, horizon | `damper.py` | Gradient limit adaptation |
 | EDF + human reserve + expiry-before-execution | `sched.py`, `damper.py` | Reserve enforced at admission |
-| Intent-digest coalescing, principal-scoped | `coalesce.py` | Cross-principal leak tested against |
+| Intent-digest coalescing, principal-scoped | `coalesce.py` | Cross-principal leak tested against; consulted before admission, see DESIGN.md §5 |
 | Terms enforcement + per-principal rate | `terms.py` | Allow/deny/purpose/rate/price |
 | Hash-chained receipts | `receipts.py` | Tamper and deletion detection tested |
 | Capability FIB, longest-match, deadline-aware selection | `fib.py` | |

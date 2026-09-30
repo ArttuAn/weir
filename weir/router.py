@@ -130,16 +130,11 @@ class Router:
 
     # -- the pipeline --------------------------------------------------
 
-    def begin(self, intent: Intent, ticket: str | None = None) -> "Admission":
-        """Run stages 1-8 and reserve capacity.  Raises :class:`Refused`.
+    def _precheck(self, intent: Intent):
+        """Stages 1-8: everything up to, but not including, admission.
 
-        Split out from :meth:`forward` because occupancy must be held for the
-        real lifetime of the upstream call.  A synchronous transport can let
-        the call stack express that; an event-driven one cannot, and if the
-        router settles as soon as it has handed the request off, its
-        concurrency limit measures nothing and admits everything.  Any async
-        data plane calls ``begin`` and then :meth:`Admission.settle` when the
-        upstream actually answers.
+        Returns ``(route, price, reserved, fanout_key)``. Raises
+        :class:`Refused`, having already released anything it took.
         """
         self.counters["seen"] += 1
 
@@ -163,13 +158,32 @@ class Router:
                 reserved = self.ledger.reserve(intent.root, intent.principal, cost)
             except InsufficientBudget as exc:
                 raise Refused(Reason.BUDGET_EXHAUSTED, str(exc)) from exc
-
-            try:
-                self.damper.admit(intent, ticket)
-            except Refused:
-                self.ledger.settle(intent.root, reserved, 0)
-                raise
         except Refused:
+            self._fanout_exit(fanout_key)
+            raise
+
+        return route, price, reserved, fanout_key
+
+    def begin(self, intent: Intent, ticket: str | None = None) -> "Admission":
+        """Run stages 1-8 and reserve capacity.  Raises :class:`Refused`.
+
+        Split out from :meth:`forward` because occupancy must be held for the
+        real lifetime of the upstream call.  A synchronous transport can let
+        the call stack express that; an event-driven one cannot, and if the
+        router settles as soon as it has handed the request off, its
+        concurrency limit measures nothing and admits everything.  Any async
+        data plane calls ``begin`` and then :meth:`Admission.settle` when the
+        upstream actually answers.
+
+        This path always takes an admission slot, because an async caller has
+        told us it intends to reach the upstream. :meth:`forward` checks the
+        coalescer first and may skip admission entirely.
+        """
+        route, price, reserved, fanout_key = self._precheck(intent)
+        try:
+            self.damper.admit(intent, ticket)
+        except Refused:
+            self.ledger.settle(intent.root, reserved, 0)
             self._fanout_exit(fanout_key)
             raise
 
@@ -177,39 +191,90 @@ class Router:
                          reserved=reserved, observed=route.price + price,
                          started=self.clock.now(), fanout_key=fanout_key)
 
+    def _settle_free(self, intent: Intent, route: Route, result, name: str,
+                     reserved: int, fanout_key) -> "Decision":
+        """Complete a request that never reached the upstream.
+
+        No damper slot was taken and none is released; no credits are charged,
+        because nothing was spent. Billing for a call that was never made is
+        how a meter loses the right to be believed.
+        """
+        self._fanout_exit(fanout_key)
+        self.ledger.settle(intent.root, reserved, 0)
+        self.counters[name] += 1
+        self.receipts.record(intent, name, credits=0)
+        return Decision(ok=True, intent=intent, route=route, result=result,
+                        disposition=name, credits=0)
+
     def forward(self, intent: Intent, ticket: str | None = None, *,
                 upstream: Callable[[Intent, Route], Any] | None = None) -> Decision:
         """Synchronous forwarding: admit, call upstream, settle.
 
         This is the path the HTTP data plane uses, where a thread per
         connection makes the call stack the natural place to hold occupancy.
+
+        Note the order: the coalescer is consulted *before* the admission
+        controller. Admission exists to protect the upstream, so gating a
+        request that will never reach the upstream is not conservative, it is
+        simply wrong - it refuses work that would have cost nothing. With the
+        checks the other way round, a hundred callers asking one question
+        behind a limit of four got four answers and ninety-six refusals for a
+        single upstream call.
         """
         try:
-            adm = self.begin(intent, ticket)
+            route, price, reserved, fanout_key = self._precheck(intent)
         except Refused as exc:
             return self._refuse(intent, exc)
 
-        failed = False
+        observed = route.price + price
+        role, key, obj = self.coalescer.acquire(intent)
+
+        if role == "hit":
+            return self._settle_free(intent, route, obj, "cached", reserved, fanout_key)
+
+        if role == "join":
+            try:
+                value = self.coalescer.join(obj, intent)
+            except Refused as exc:
+                # The leader was refused, so nobody is going upstream. Every
+                # waiter inherits that refusal rather than silently hanging.
+                self.ledger.settle(intent.root, reserved, 0)
+                self._fanout_exit(fanout_key)
+                return self._refuse(intent, exc)
+            except Exception:
+                self.ledger.settle(intent.root, reserved, 0)
+                self._fanout_exit(fanout_key)
+                raise
+            return self._settle_free(intent, route, value, "coalesced",
+                                     reserved, fanout_key)
+
+        # "lead" or "bypass": this request really will reach the upstream, so
+        # now it is fair to make it compete for capacity.
         try:
-            def work():
-                if upstream is None:
-                    return {"ok": True, "upstream": adm.route.upstream}
-                return upstream(intent.forwarded(self.here, adm.observed), adm.route)
-
-            result, disposition = self.coalescer.run(intent, work)
+            self.damper.admit(intent, ticket)
         except Refused as exc:
-            adm.settle(observed=0, failed=True)
+            if role == "lead":
+                self.coalescer.release(key, obj, error=exc)
+            self.ledger.settle(intent.root, reserved, 0)
+            self._fanout_exit(fanout_key)
             return self._refuse(intent, exc)
-        except Exception:
+
+        adm = Admission(router=self, intent=intent, route=route, reserved=reserved,
+                        observed=observed, started=self.clock.now(),
+                        fanout_key=fanout_key)
+        try:
+            if upstream is None:
+                result = {"ok": True, "upstream": route.upstream}
+            else:
+                result = upstream(intent.forwarded(self.here, observed), route)
+        except BaseException as exc:
+            if role == "lead":
+                self.coalescer.release(key, obj, error=exc)
             adm.settle(observed=0, failed=True)
             raise
-
-        # A coalesced or cached answer cost no upstream work, so it is settled
-        # at zero: charging for a call that was never made is how a meter
-        # loses the right to be believed.
-        return adm.settle(result=result,
-                          observed=adm.observed if disposition == "miss" else 0,
-                          disposition=disposition)
+        if role == "lead":
+            self.coalescer.release(key, obj, result=result)
+        return adm.settle(result=result, observed=observed, disposition="miss")
 
     # -- refusal path --------------------------------------------------
 

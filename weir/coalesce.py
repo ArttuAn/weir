@@ -58,52 +58,86 @@ class Coalescer:
         scope = "public" if intent.capability in self.public else intent.principal
         return (scope, intent.capability, intent.intent_digest)
 
-    def run(self, intent: Intent, work: Callable[[], Any]) -> tuple[Any, str]:
-        """Execute ``work``, or return an in-flight or cached result.
+    def acquire(self, intent: Intent) -> tuple[str, tuple | None, Any]:
+        """Decide this caller's role in one atomic step.
 
-        Returns ``(result, disposition)`` where disposition is one of
-        ``hit``, ``joined``, ``miss``.
+        Split out from :meth:`run` so the router can find out whether a request
+        will actually reach the upstream *before* it spends an admission slot
+        on it. Returns one of:
+
+        ``("hit", key, value)``     cached; serve now, no upstream call
+        ``("join", key, flight)``   someone else is already fetching this
+        ``("lead", key, flight)``   we must fetch it; the flight is registered,
+                                    so the caller MUST call :meth:`release`
+        ``("bypass", None, None)``  not coalescable (unsafe, or no digest)
         """
         k = self.key(intent)
         if k is None:
-            return work(), "miss"
+            return "bypass", None, None
 
         now = self._clock.now()
         with self._lock:
             entry = self._cache.get(k)
             if entry and entry[0] > now:
                 self.hits += 1
-                return entry[1], "hit"
+                return "hit", k, entry[1]
 
             flight = self._flights.get(k)
             if flight is not None:
                 flight.waiters += 1
                 self.joined += 1
-                leader = False
-            else:
-                flight = _Flight()
-                self._flights[k] = flight
-                self.misses += 1
-                leader = True
+                return "join", k, flight
 
-        if not leader:
-            flight.event.wait(timeout=max(0.0, intent.deadline - now))
-            if flight.error is not None:
-                raise flight.error
-            return flight.result, "joined"
+            flight = _Flight()
+            self._flights[k] = flight
+            self.misses += 1
+            return "lead", k, flight
+
+    def join(self, flight: _Flight, intent: Intent) -> Any:
+        """Wait for the leader's result. Raises whatever the leader raised."""
+        flight.event.wait(timeout=max(0.0, intent.deadline - self._clock.now()))
+        if flight.error is not None:
+            raise flight.error
+        return flight.result
+
+    def release(self, key: tuple, flight: _Flight, *, result: Any = None,
+                error: BaseException | None = None) -> None:
+        """Publish the leader's outcome and wake every waiter.
+
+        Must be called exactly once for every ``("lead", ...)`` acquisition,
+        including the paths where the leader never got to make the call - a
+        leader that is refused admission and returns without releasing leaves
+        its waiters blocked until their deadlines expire.
+        """
+        with self._lock:
+            self._flights.pop(key, None)
+            if error is None:
+                self._cache[key] = (self._clock.now() + self.ttl, result)
+        flight.result = result
+        flight.error = error
+        flight.event.set()
+
+    def run(self, intent: Intent, work: Callable[[], Any]) -> tuple[Any, str]:
+        """Execute ``work``, or return an in-flight or cached result.
+
+        Returns ``(result, disposition)`` where disposition is one of
+        ``hit``, ``joined``, ``miss``.
+        """
+        role, key, obj = self.acquire(intent)
+        if role == "hit":
+            return obj, "hit"
+        if role == "join":
+            return self.join(obj, intent), "joined"
+        if role == "bypass":
+            return work(), "miss"
 
         try:
-            flight.result = work()
+            value = work()
         except BaseException as exc:
-            flight.error = exc
+            self.release(key, obj, error=exc)
             raise
-        finally:
-            with self._lock:
-                self._flights.pop(k, None)
-                if flight.error is None:
-                    self._cache[k] = (self._clock.now() + self.ttl, flight.result)
-            flight.event.set()
-        return flight.result, "miss"
+        self.release(key, obj, result=value)
+        return value, "miss"
 
     def sweep(self) -> int:
         now = self._clock.now()

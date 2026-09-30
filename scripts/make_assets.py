@@ -407,7 +407,7 @@ def build_internals(t: dict) -> str:
     b.append(rect(x2, y, 440, h, fill=t["panel"], stroke=t["line"], rx=12))
     b.append(text(x2 + 18, y + 28, "stages 6–12  ·  mutable state", size=15,
                   fill=t["ink"], weight=700))
-    for i, sname in enumerate(["route", "budget", "damper", "coalesce"]):
+    for i, sname in enumerate(["route", "budget", "coalesce", "damper"]):
         cx = x2 + 22 + i * 104
         b.append(rect(cx, y + 44, 94, 30, fill=t["panel"], stroke=t["line"], rx=6))
         b.append(text(cx + 47, y + 64, sname, size=11.5, fill=t["ink"],
@@ -770,7 +770,7 @@ def _fig3(t, oy):
                    weight=700, family=MONO, spacing="0.6"))
     b.append(p_ref(60, hy - 14, (60, hy), 220, ink))
     host = [("ROUTE", "SELECT", 312), ("LEDGER", "DEBIT", 314),
-            ("ADMISSION", "CONTROL", 316), ("INTENT", "COALESCE", 318),
+            ("INTENT", "COALESCE", 316), ("ADMISSION", "CONTROL", 318),
             ("FORWARD", "UPSTREAM", 320), ("SETTLE", "OBSERVED", 322),
             ("RECEIPT", "WRITER", 324)]
     for i, (nm, s2, num) in enumerate(host):
@@ -894,8 +894,8 @@ def _fig5(t, oy):
         ("test", ["TERMS", "PERMIT?"], 712, ("NO", 758, ["REFUSE", "TERMS DENIED"]), None),
         ("step", ["SELECT ROUTE BY", "CAPABILITY"], 714, None, None),
         ("test", ["ROOT BUDGET", "SUFFICIENT?"], 716, ("NO", 760, ["REFUSE", "BUDGET EXHAUSTED"]), None),
-        ("test", ["CAPACITY", "AVAILABLE?"], 718, ("NO", 762, ["ISSUE APPOINTMENT", "CHARGE REFUSAL"]), None),
-        ("test", ["IDENTICAL INTENT", "IN FLIGHT?"], 720, ("YES", 764, ["JOIN, RETURN", "SHARED RESULT"]), None),
+        ("test", ["IDENTICAL INTENT", "IN FLIGHT?"], 718, ("YES", 762, ["JOIN, RETURN", "SHARED RESULT"]), None),
+        ("test", ["CAPACITY", "AVAILABLE?"], 720, ("NO", 764, ["ISSUE APPOINTMENT", "CHARGE REFUSAL"]), None),
         ("step", ["FORWARD TO UPSTREAM"], 722, None, None),
         ("step", ["SETTLE OBSERVED COST"], 724, None, None),
         ("step", ["APPEND RECEIPT"], 726, None, None),

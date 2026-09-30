@@ -129,8 +129,8 @@ Cheapest and most terminal first, exactly like an ACL fast path:
  5  terms         origin policy, before the origin is contacted at all
  6  route         capability lookup, needed to price anything
  7  budget        ledger reservation, first contended lock
- 8  damper        admission and appointments
- 9  coalesce      dedupe, may avoid the upstream entirely
+ 8  coalesce      dedupe; may avoid the upstream entirely
+ 9  damper        admission and appointments
 10  forward       the only expensive step
 11  settle        reconcile declared against observed cost
 12  receipt       record the decision either way
@@ -142,9 +142,26 @@ so a refusal that happens after the upstream call has saved nothing. A looping
 agent with an expired deadline and an empty wallet is refused at stage 3 for the
 cost of parsing a header.
 
-Budget (7) deliberately precedes admission (8): a request that cannot be paid for
+Budget (7) deliberately precedes admission: a request that cannot be paid for
 should never occupy a queue slot, or a bankrupt swarm can still deny service to a
 solvent one.
+
+**Coalescing (8) precedes admission (9), and the original order was a bug.**
+Admission control exists to protect the upstream. A request served from cache,
+or joined onto a call another caller is already making, never reaches the
+upstream at all - so gating it on upstream capacity is not conservative, it
+refuses work that would have cost nothing. With the stages the other way round,
+twenty callers asking one question behind a limit of four got four answers and
+sixteen `congested` refusals, for a single upstream call. The fix cost nothing
+and is pinned by `tests/test_coalesce_admission.py`.
+
+The ordering has a subtlety worth stating, because it is the thing that breaks
+if this is reimplemented carelessly. Only the *leader* of a coalesced group
+reaches the upstream, so only the leader takes a slot. If that leader is then
+refused admission, it must publish the refusal to everyone waiting behind it; a
+leader that simply returns leaves its waiters blocked until their deadlines
+expire, which converts a fast refusal into a slow one for every caller but the
+first.
 
 ## 6. Congestion control in detail
 
