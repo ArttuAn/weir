@@ -20,6 +20,7 @@ import dataclasses
 import json
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -53,6 +54,8 @@ def make_handler(router: Router):
                 ok, msg = router.receipts.verify()
                 return self._send(200, {"verified": ok, "detail": msg,
                                         "tip": router.receipts.tip})
+            if self.path.startswith("/_weir/receipts/"):
+                return self._receipts_for(self.path[len("/_weir/receipts/"):])
             if self.path == "/_weir/housekeep":
                 return self._send(200, router.housekeep())
             if self.path == "/_weir/routes":
@@ -61,6 +64,35 @@ def make_handler(router: Router):
                 return self._send(200, {"routes": [dataclasses.asdict(r)
                                                   for r in router.fib.routes()]})
             return self._send(404, {"error": "not found"})
+
+        def _receipts_for(self, raw: str) -> None:
+            """The audit trail for one delegation tree, and nothing else.
+
+            Scoped on purpose.  The flat chain is the right thing to hand an
+            operator with the whole box, and the wrong thing to hand a caller
+            with one root: it is every other principal's activity on the network,
+            which is a much larger disclosure than the question being asked and
+            mostly not the asker's business.
+
+            Note what is *not* here: no payload, and the query is only ever
+            compared against entries in memory - it is never used to build a
+            path, so there is nothing for a crafted root to traverse.
+            """
+            root = urllib.parse.unquote(raw)
+            found = router.receipts.for_root(root)
+            if not found:
+                return self._send(404, {"error": "no receipts for that root",
+                                        "root": root})
+            ok, msg = router.receipts.verify()
+            first, last = router.receipts.window()
+            return self._send(200, {
+                "root": root,
+                "count": len(found),
+                "entries": [dataclasses.asdict(r) for r in found],
+                "verified": ok,
+                "detail": msg,
+                "window": {"from_seq": first, "to_seq": last, "trimmed": first > 0},
+            })
 
         def do_POST(self):
             raw_len = self.headers.get("content-length") or "0"

@@ -40,7 +40,7 @@ class Receipt:
     principal: str
     agent: str
     capability: str
-    decision: str          # forwarded | coalesced | cached | refused
+    decision: str          # forwarded | coalesced | cached | refused | failed
     reason: str            # refusal reason, or ""
     credits: int
     depth: int
@@ -108,6 +108,40 @@ class ReceiptLog:
     def entries(self) -> list[Receipt]:
         with self._lock:
             return list(self._entries)
+
+    def for_root(self, root: str) -> list[Receipt]:
+        """Every in-window receipt for one delegation tree, oldest first.
+
+        The root is the natural unit of accountability: it is minted by whoever
+        asked the question at the top and propagated unchanged down the tree, so
+        "everything that root did" is the whole tree at every hop - which is
+        exactly the question a principal asking "what did my agent spend, and
+        on whose authority" is asking, and exactly what a flat dump of the log
+        makes them wade through to answer.
+
+        A linear scan, deliberately. The obvious optimisation is a by-root
+        index, and the obvious reason to want it is that this gets called by an
+        HTTP request. But an index is a second structure that can disagree with
+        the chain, and a chain that misreports its own contents is a worse
+        failure than a read that is O(n) over a window already capped at
+        ``keep``. The window is the bound; say so rather than pretend otherwise.
+        """
+        with self._lock:
+            return [r for r in self._entries if r.root == root]
+
+    def window(self) -> tuple[int, int]:
+        """Inclusive seq range still held in memory.
+
+        Anything below ``from_seq`` was trimmed and survives only in the file,
+        if one was configured.  A caller reading a root's receipts through a
+        trimmed window is looking at a partial answer and has to be able to
+        tell, so this is reported alongside the entries rather than left for
+        the reader to infer from a seq number.
+        """
+        with self._lock:
+            if not self._entries:
+                return (0, -1)
+            return (self._entries[0].seq, self._entries[-1].seq)
 
     def verify(self) -> tuple[bool, str]:
         """Re-walk the chain.  Returns ``(ok, message)``."""

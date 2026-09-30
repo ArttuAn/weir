@@ -269,8 +269,19 @@ is a forgeable identity for the whole AAS.
 
 ## 10. Operating it
 
-Endpoints: `/_weir/stats`, `/_weir/receipts`, `/_weir/routes`,
-`/_weir/housekeep`.
+Endpoints: `/_weir/stats`, `/_weir/receipts`, `/_weir/receipts/<root>`,
+`/_weir/routes`, `/_weir/housekeep`.
+
+`/_weir/receipts` verifies the chain and reports its tip. `/_weir/receipts/<root>`
+returns one delegation tree's entries — every hop, oldest first — because the
+question a caller actually has is "what did *my* agent do, and who authorised
+it", and answering it from a flat dump means reading everyone else's activity on
+the network to find it. The response carries the in-memory window, since
+entries older than the window survive only in the receipt file. No payloads: the
+digest is kept so sameness can be shown without keeping the question.
+
+Like the rest of `/_weir/*`, it is unauthenticated and is meant for the single
+operator who already has the box.
 
 Signals worth alarming on, each derived from a specific failure this design can
 actually have:

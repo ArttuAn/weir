@@ -42,6 +42,7 @@ def cmd_run(args) -> int:
               "principal, budget or priority.")
     print(f"  stats    http://{args.host}:{args.port}/_weir/stats")
     print(f"  receipts http://{args.host}:{args.port}/_weir/receipts")
+    print(f"           .../<root> for one delegation tree's audit trail")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
