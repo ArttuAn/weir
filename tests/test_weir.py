@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import threading
-import time
 import unittest
 
 from weir.attest import Keyring
@@ -13,8 +12,16 @@ from weir.coalesce import Coalescer
 from weir.damper import Appointment, Damper
 from weir.errors import Reason, Refused
 from weir.fib import Fib, Route
-from weir.intent import (CREDIT, Hop, Intent, MalformedIntent, digest_of,
-                         from_headers, new_root, to_headers)
+from weir.intent import (
+    CREDIT,
+    Hop,
+    Intent,
+    MalformedIntent,
+    digest_of,
+    from_headers,
+    new_root,
+    to_headers,
+)
 from weir.ledger import InsufficientBudget, Ledger
 from weir.pathvec import PathGuard
 from weir.receipts import ReceiptLog

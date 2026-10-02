@@ -67,7 +67,7 @@ class Appointment:
         return f"{self.not_before:.3f}|{self.attempt}|{self.issued:.3f}|{self.mac}"
 
     @staticmethod
-    def decode(text: str) -> "Appointment | None":
+    def decode(text: str) -> Appointment | None:
         try:
             nb, att, iss, mac = text.split("|")
             return Appointment(float(nb), int(att), float(iss), mac)

@@ -33,14 +33,14 @@ still deny service to a solvent one.
 from __future__ import annotations
 
 import threading
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from .attest import Keyring
 from .clock import RealClock
 from .coalesce import Coalescer
-from .damper import Appointment, Damper
+from .damper import Damper
 from .errors import Reason, Refused
 from .fib import Fib, Route
 from .intent import CREDIT, Hop, Intent
@@ -124,7 +124,7 @@ class Router:
 
     # -- configuration -------------------------------------------------
 
-    def route(self, *args, **kwargs) -> "Router":
+    def route(self, *args, **kwargs) -> Router:
         """Add a route; returns self so config reads as a chain."""
         self.fib.add(args[0] if args and isinstance(args[0], Route) else Route(*args, **kwargs))
         return self
@@ -169,7 +169,7 @@ class Router:
 
         return route, price, reserved, fanout_key
 
-    def begin(self, intent: Intent, ticket: str | None = None) -> "Admission":
+    def begin(self, intent: Intent, ticket: str | None = None) -> Admission:
         """Run stages 1-8 and reserve capacity.  Raises :class:`Refused`.
 
         Split out from :meth:`forward` because occupancy must be held for the
@@ -197,7 +197,7 @@ class Router:
                          started=self.clock.now(), fanout_key=fanout_key)
 
     def _settle_free(self, intent: Intent, route: Route, result, name: str,
-                     reserved: int, fanout_key) -> "Decision":
+                     reserved: int, fanout_key) -> Decision:
         """Complete a request that never reached the upstream.
 
         No damper slot was taken and none is released; no credits are charged,
@@ -395,7 +395,7 @@ class Admission:
     object exists rather than a pair of loose calls.
     """
 
-    router: "Router"
+    router: Router
     intent: Intent
     route: Route
     reserved: int

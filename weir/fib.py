@@ -27,7 +27,7 @@ from fields the header already carries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .errors import Reason, Refused
 from .intent import Intent

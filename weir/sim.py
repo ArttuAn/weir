@@ -30,16 +30,14 @@ named parameter in this file so the shape can be argued with.
 from __future__ import annotations
 
 import random
-import statistics
 from dataclasses import dataclass, field
 
 from .clock import VirtualClock
 from .damper import Appointment
 from .errors import Reason, Refused
 from .fib import Route
-from .intent import CREDIT, Intent, digest_of, new_root
+from .intent import CREDIT, Intent, new_root
 from .router import Router, RouterConfig
-
 
 # ---------------------------------------------------------------------------
 # Modelled upstream

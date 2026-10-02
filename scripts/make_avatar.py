@@ -13,7 +13,6 @@ Usage:  python3 scripts/make_avatar.py
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 try:

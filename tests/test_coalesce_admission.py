@@ -18,7 +18,6 @@ import threading
 import time
 import unittest
 
-from weir.clock import VirtualClock
 from weir.errors import Reason
 from weir.fib import Route
 from weir.intent import CREDIT, Intent, digest_of, new_root

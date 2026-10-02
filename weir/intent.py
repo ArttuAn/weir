@@ -74,8 +74,9 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
+from typing import Any
 
 WIH_VERSION = 0
 
@@ -103,7 +104,7 @@ class Hop:
         return f"{self.aas}:{self.agent}"
 
     @staticmethod
-    def parse(text: str) -> "Hop":
+    def parse(text: str) -> Hop:
         aas, _, agent = text.partition(":")
         if not agent or not aas.isdigit():
             raise MalformedIntent(f"bad path element {text!r}")
@@ -207,7 +208,7 @@ class Intent:
 
     # -- transforms ----------------------------------------------------
 
-    def forwarded(self, by: Hop, cost: int) -> "Intent":
+    def forwarded(self, by: Hop, cost: int) -> Intent:
         """The header as it leaves this router, heading to the next hop.
 
         Decrements depth, prepends this hop to the path vector, and debits the
@@ -223,7 +224,7 @@ class Intent:
         )
 
     def child(self, agent: str, capability: str, share: int, *, safe: bool = True,
-              digest: str = "", deadline: float | None = None) -> "Intent":
+              digest: str = "", deadline: float | None = None) -> Intent:
         """Derive a sub-request for a fan-out call.
 
         The child inherits root, principal, deadline and coupling.  It cannot

@@ -16,7 +16,7 @@ import json
 from .clock import VirtualClock
 from .errors import Reason
 from .fib import Route
-from .intent import CREDIT, Hop, Intent, digest_of, new_root
+from .intent import CREDIT, Hop, Intent, new_root
 from .router import Router, RouterConfig
 from .sim import AgentSpec, run_storm
 

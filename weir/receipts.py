@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from hashlib import blake2b
 
 from .intent import Intent

@@ -22,8 +22,9 @@ Two rules keep this from being a security hole, and they are not optional:
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from .errors import Reason, Refused
 from .intent import Intent

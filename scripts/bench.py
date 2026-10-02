@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import platform
-import statistics
 import sys
 import time
 import tracemalloc
@@ -32,10 +31,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from weir.attest import Keyring
 from weir.clock import VirtualClock
-from weir.errors import Refused
 from weir.fib import Route
-from weir.intent import (CREDIT, Hop, Intent, digest_of, from_headers, new_root,
-                         to_headers)
+from weir.intent import (
+    CREDIT,
+    Hop,
+    Intent,
+    digest_of,
+    from_headers,
+    new_root,
+    to_headers,
+)
 from weir.ledger import Ledger
 from weir.receipts import ReceiptLog
 from weir.router import Router, RouterConfig

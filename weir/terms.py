@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import fnmatch
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .errors import Reason, Refused
 from .intent import Intent
@@ -100,7 +100,8 @@ class TermsRegistry:
                     wait = (1.0 - tokens) / terms.rate
                     self._buckets[key] = (tokens, now)
                     raise Refused(Reason.CONGESTED,
-                                  f"{origin} terms allow {terms.rate}/s for this principal",
+                                  f"{origin} terms allow {terms.rate}/s "
+                                  f"for this principal",
                                   retry_not_before=now + wait,
                                   charged=0)
                 self._buckets[key] = (tokens - 1.0, now)

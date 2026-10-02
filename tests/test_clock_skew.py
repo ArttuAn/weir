@@ -14,7 +14,7 @@ import threading
 import time
 import unittest
 
-from weir.client import CallFailed, Caller
+from weir.client import Caller, CallFailed
 from weir.fib import Route
 from weir.intent import CREDIT
 from weir.router import Router, RouterConfig

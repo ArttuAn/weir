@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 import time
 
 from . import __version__
@@ -42,7 +41,7 @@ def cmd_run(args) -> int:
               "principal, budget or priority.")
     print(f"  stats    http://{args.host}:{args.port}/_weir/stats")
     print(f"  receipts http://{args.host}:{args.port}/_weir/receipts")
-    print(f"           .../<root> for one delegation tree's audit trail")
+    print("           .../<root> for one delegation tree's audit trail")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -75,7 +74,7 @@ def cmd_verify(args) -> int:
 
 
 def cmd_call(args) -> int:
-    from .client import CallFailed, Caller
+    from .client import Caller, CallFailed
     c = Caller(router_url=args.router, principal=args.principal,
                agent=args.agent, budget=args.budget)
     try:
