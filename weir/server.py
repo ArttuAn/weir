@@ -29,7 +29,41 @@ from .intent import MalformedIntent, from_headers, to_headers
 from .router import Router
 
 
-def make_handler(router: Router):
+MAX_BODY_BYTES = 1024 * 1024
+
+
+class BodyError(ValueError):
+    def __init__(self, status, detail):
+        super().__init__(detail)
+        self.status = status
+
+
+def _read_body(request, limit=MAX_BODY_BYTES):
+    lengths = request.headers.get_all("content-length", [])
+    if len(lengths) > 1 or request.headers.get("transfer-encoding"):
+        raise BodyError(400, "ambiguous or unsupported request framing")
+    raw_length = (lengths[0] if lengths else "0").strip()
+    try:
+        if not raw_length.isascii() or not raw_length.isdecimal():
+            raise ValueError(raw_length)
+        length = int(raw_length)
+    except ValueError:
+        raise BodyError(400, f"bad content-length {raw_length!r}") from None
+    if length > limit:
+        raise BodyError(413, "request body exceeds the configured limit")
+    request.connection.settimeout(10)
+    try:
+        body = request.rfile.read(length) if length else b""
+    except TimeoutError:
+        raise BodyError(408, "request body timed out") from None
+    if len(body) != length:
+        raise BodyError(400, "incomplete request body")
+    return body
+
+
+def make_handler(router: Router, *, max_body_bytes: int = MAX_BODY_BYTES):
+    if max_body_bytes <= 0:
+        raise ValueError("max_body_bytes must be positive")
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "weir/0"
@@ -95,21 +129,13 @@ def make_handler(router: Router):
             })
 
         def do_POST(self):
-            raw_len = self.headers.get("content-length") or "0"
             try:
-                length = int(raw_len)
-                if length < 0:
-                    raise ValueError(raw_len)
-            except ValueError:
-                # The framing itself is what is broken. The body length is
-                # unknown, so the bytes already sitting in the socket cannot be
-                # located and a keep-alive client would parse them as the next
-                # request. Answer, then hang up rather than guess.
+                body = _read_body(self, max_body_bytes)
+            except BodyError as exc:
                 self.close_connection = True
-                return self._send(400, {"reason": Reason.MALFORMED,
-                                        "detail": f"bad content-length {raw_len!r}"},
+                return self._send(exc.status, {"reason": Reason.MALFORMED,
+                                               "detail": str(exc)},
                                   {"Connection": "close"})
-            body = self.rfile.read(length) if length else b""
             headers = {k.lower(): v for k, v in self.headers.items()}
 
             try:
@@ -201,8 +227,9 @@ def _housekeeper(router: Router, every: float) -> threading.Thread:
 
 
 def serve(router: Router, host: str = "127.0.0.1", port: int = 8710,
-          *, housekeep_every: float = 30.0) -> ThreadingHTTPServer:
-    httpd = ThreadingHTTPServer((host, port), make_handler(router))
+          *, housekeep_every: float = 30.0,
+          max_body_bytes: int = MAX_BODY_BYTES) -> ThreadingHTTPServer:
+    httpd = ThreadingHTTPServer((host, port), make_handler(router, max_body_bytes=max_body_bytes))
     httpd.daemon_threads = True
     # Without this the router leaks root accounts until it is killed.
     httpd.housekeeper = _housekeeper(router, housekeep_every)  # type: ignore[attr-defined]
@@ -223,8 +250,12 @@ class EchoOrigin(BaseHTTPRequestHandler):
     def do_POST(self):
         import time
         time.sleep(self.delay)
-        n = int(self.headers.get("content-length") or 0)
-        body = self.rfile.read(n) if n else b"{}"
+        try:
+            body = _read_body(self) or b"{}"
+        except BodyError as exc:
+            self.close_connection = True
+            self.send_error(exc.status, str(exc))
+            return
         out = json.dumps({
             "origin": "echo",
             "saw_principal": self.headers.get("weir-principal"),
